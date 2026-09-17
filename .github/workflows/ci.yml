@@ -72,7 +72,7 @@ jobs:
       # Brindle is compiled from a pinned commit, so this layer is stable and
       # worth caching hard — a cold build is minutes, a warm one is seconds.
       - name: Cache the Postgres image layers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/.buildx-cache
           key: docker-brindle-${{ hashFiles('docker/Dockerfile') }}
