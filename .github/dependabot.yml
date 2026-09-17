@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # These move together; a mismatched pair breaks the graph in confusing ways.
+      langgraph:
+        patterns:
+          - "langgraph*"
+          - "langchain*"
+      dev-tooling:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "weekly"
+    # Brindle and pgvector are pinned by ARG, not by a FROM line, so Dependabot
+    # will not touch them — bumping Brindle is a decision with an eval re-run
+    # attached. See docs/DEVELOPMENT.md.

@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo (this project runs on Linux/WSL and
+# in Docker, where CRLF breaks shell scripts and initdb SQL).
+* text=auto eol=lf
+
+# Binary-ish files we never want munged
+*.png binary
+*.jpg binary
+*.gz binary
+*.mp4 binary
+*.gif binary

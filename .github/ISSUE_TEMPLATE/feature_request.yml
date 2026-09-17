@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a capability or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The search or workflow that is awkward today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Scout to do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of Scout?
+      options:
+        - data (loading, schema, privacy)
+        - graph (parse, check, answer)
+        - retrieval (filters, SQL, the index)
+        - eval (metrics, baselines, reporting)
+        - infra (Docker, CI, tooling)
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Anything that makes this harder than it looks?
+      description: >
+        For example: does it need a filter type Brindle cannot push down, data
+        Scout deliberately does not store, or a change to Brindle itself?

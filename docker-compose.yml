@@ -1,0 +1,45 @@
+services:
+  db:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    image: scout-postgres:17-brindle
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: scout
+      POSTGRES_DB: scout
+    ports:
+      # Override with SCOUT_DB_PORT so a worktree sandbox can claim its own port
+      # (see scripts/worktree.sh) without editing this file.
+      - "${SCOUT_DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command:
+      - postgres
+      # An index build rewrites the whole Brindle blob and pgvector's HNSW build
+      # is memory-hungry; both are one-shot loads, so give them room.
+      - -c
+      - maintenance_work_mem=2GB
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - work_mem=64MB
+      # Every backend decodes its own copy of the Brindle index (~1.9 KB/node at
+      # 384 dims). Keep the connection pool small; see docs/DEVELOPMENT.md.
+      - -c
+      - max_connections=50
+    healthcheck:
+      # Checks the extensions, not just the socket: the container is only
+      # "healthy" once the thing Scout depends on actually loaded.
+      test:
+        [
+          "CMD-SHELL",
+          "psql -U scout -d scout -tAc \"SELECT count(*) FROM pg_extension WHERE extname IN ('brindle','vector')\" | grep -q '^2$$'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+volumes:
+  pgdata:

@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+# uv.lock IS committed: Scout is an end-product application, so we want
+# reproducible installs in CI and for anyone reproducing the eval.
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Inside Airbnb data — NEVER commit. The data is CC BY 4.0 but the project's
+# community guidelines ask that it not be republished; users download it
+# themselves (see docs/DATA.md). This covers the raw CSVs, anything derived
+# from them, and the embeddings.
+/data/
+
+# Relevance labels reference listing IDs from one specific snapshot, so they
+# are not portable and are not ours to publish.
+/eval/labels/
+
+# Evaluation run outputs (reports are published deliberately, not by default)
+/eval/runs/
+
+# Local model cache (sentence-transformers downloads into here if pointed at it)
+/.models/
+
+# Secrets — ANTHROPIC_API_KEY and the database URL live here, never in git.
+.env
+.env.local
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Keep AI working instructions out of the public repo
+CLAUDE.md
+
+# Project-management / orchestration (dev-only, never shipped).
+# No trailing slash, so this also matches the symlinks worktrees create back to
+# the main clone (see scripts/worktree.sh) — a trailing slash matches only a dir.
+/tasks
+
+# Career / résumé / interview prep (personal — never publish)
+/career

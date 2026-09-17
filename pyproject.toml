@@ -1,0 +1,98 @@
+[project]
+name = "scout"
+version = "0.0.1"
+description = "An agentic search workflow over short-term rental listings, backed by Brindle filtered vector search"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Adrien Dinzey" }]
+
+dependencies = [
+    "langgraph>=1.0,<2.0",
+    "anthropic>=0.40",
+    "psycopg[binary,pool]>=3.2",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "typer>=0.15",
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+# sentence-transformers drags in torch (~2 GB). Kept out of the default install
+# so CI, lint, and unit tests stay fast; only the embed pipeline needs it.
+embed = ["sentence-transformers>=3.3"]
+
+[project.scripts]
+scout = "scout.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/scout"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # flake8-bugbear
+    "A",         # flake8-builtins
+    "C4",        # flake8-comprehensions
+    "SIM",       # flake8-simplify
+    "PTH",       # flake8-use-pathlib
+    "RUF",       # ruff-specific
+    "ANN",       # flake8-annotations
+    "S",         # flake8-bandit
+    "T20",       # flake8-print
+    "TRY",       # tryceratops (no silent excepts)
+    "BLE",       # flake8-blind-except
+]
+ignore = [
+    "ANN401",  # Any is occasionally the honest annotation at the LLM boundary
+    "TRY003",  # long messages inside raise are clearer than a wrapper class here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may assert and print. S608 is a false positive here: integration tests
+# interpolate a hardcoded fixture table name, never user input.
+"tests/**" = ["S101", "ANN", "T20", "S608"]
+# The CLI is the one place that legitimately writes to stdout.
+"src/scout/cli.py" = ["T20"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+strict = true
+warn_unreachable = true
+disallow_any_generics = true
+# Surface the error code so a targeted ignore can be justified in review.
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# No bundled stubs; imported lazily behind our own typed wrapper.
+module = ["sentence_transformers.*", "langgraph.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "integration: requires the Compose Postgres (deselect with '-m \"not integration\"')",
+]

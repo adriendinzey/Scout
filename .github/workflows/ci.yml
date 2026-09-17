@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.15"
+  # Belt and braces: even if a test tried to reach the API, there is no key and
+  # the backend default is `fake`. CI must never spend money.
+  SCOUT_LLM_BACKEND: fake
+
+jobs:
+  lint:
+    name: lint + types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # No --all-extras: the embed extra pulls torch (~2 GB) and nothing in
+      # lint, types, or unit tests needs it.
+      - name: Install
+        run: uv sync --locked
+
+      - name: Ruff (lint)
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+
+      - name: Mypy (strict on src/)
+        run: uv run mypy
+
+  test:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Pytest (unit)
+        run: uv run pytest -m "not integration" -v
+
+  integration:
+    name: integration (postgres + brindle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # Brindle is compiled from a pinned commit, so this layer is stable and
+      # worth caching hard — a cold build is minutes, a warm one is seconds.
+      - name: Cache the Postgres image layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: docker-brindle-${{ hashFiles('docker/Dockerfile') }}
+          restore-keys: docker-brindle-
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the database image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./docker
+          load: true
+          tags: scout-postgres:17-brindle
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      # Standard buildx cache rotation; without it the cache grows without bound.
+      - name: Rotate the build cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Start the database
+        run: docker compose up -d --wait db
+
+      - name: Both extensions actually loaded
+        run: |
+          docker compose exec -T db psql -U scout -d scout -c \
+            "SELECT extname, extversion FROM pg_extension WHERE extname IN ('brindle','vector');"
+          docker compose exec -T db psql -U scout -d scout -tAc \
+            "SELECT count(*) FROM pg_am WHERE amname = 'brindle'" | grep -qx 1
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Pytest (integration)
+        env:
+          SCOUT_DATABASE_URL: postgresql://scout:scout@localhost:5433/scout
+        run: uv run pytest -m integration -v
+
+      - name: Database logs on failure
+        if: failure()
+        run: docker compose logs db
