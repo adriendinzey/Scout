@@ -28,3 +28,10 @@ updates:
     # Brindle and pgvector are pinned by ARG, not by a FROM line, so Dependabot
     # will not touch them — bumping Brindle is a decision with an eval re-run
     # attached. See docs/DEVELOPMENT.md.
+    ignore:
+      # Brindle supports PostgreSQL 16 and 17 ONLY. A major bump breaks
+      # `CREATE EXTENSION brindle` and the pgrx build with it, so the postgres
+      # major is a deliberate decision gated on Brindle adding support — never a
+      # routine dependency update. Patch and minor bumps within 17 are welcome.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
