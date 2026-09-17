@@ -10,7 +10,7 @@
 # .so matches the server ABI exactly.
 
 # ---------------------------------------------------------------- builder ---
-FROM postgres:17-bookworm AS builder
+FROM postgres:18-bookworm AS builder
 
 # Pinned deliberately. Scout's README reports which Brindle commit produced its
 # numbers; bumping this is a decision with an eval re-run attached, not a chore.
@@ -64,7 +64,7 @@ RUN cp -a target/release/brindle-pg17/. /out/ \
     && ls -la /out/usr/share/postgresql/17/extension/
 
 # ---------------------------------------------------------------- runtime ---
-FROM postgres:17-bookworm
+FROM postgres:18-bookworm
 
 COPY --from=builder /out/usr/lib/postgresql/17/lib/     /usr/lib/postgresql/17/lib/
 COPY --from=builder /out/usr/share/postgresql/17/extension/ /usr/share/postgresql/17/extension/
