@@ -2127,7 +2127,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40" },
+    { name = "anthropic", specifier = ">=1.6" },
     { name = "langgraph", specifier = ">=1.0,<2.0" },
     { name = "langsmith", marker = "extra == 'trace'", specifier = ">=0.1" },
     { name = "numpy", specifier = ">=2.0" },
