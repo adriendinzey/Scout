@@ -28,7 +28,15 @@ pytestmark = pytest.mark.integration
 TEST_SCHEMA = "scout_schema_test"
 
 SCOUT_TABLES = frozenset(
-    {"listings", "reviews", "neighbourhoods", "room_types", "property_types", "amenities"}
+    {
+        "listings",
+        "reviews",
+        "neighbourhoods",
+        "room_types",
+        "property_types",
+        "amenities",
+        "data_snapshot",
+    }
 )
 
 # docs/DATA.md section 4. These never reach the database: they are dropped while
@@ -58,7 +66,7 @@ FILTERABLE_COLUMNS = {
     "neighbourhood_id": "integer",
     "room_type_id": "smallint",
     "property_type_id": "smallint",
-    "price_usd": "real",
+    "price_gbp": "real",
     "accommodates": "smallint",
     "bedrooms": "smallint",
     "beds": "smallint",
@@ -81,17 +89,20 @@ AMENITY_COLUMN_HEADROOM = MAX_INDEX_KEY_COLUMNS - 1 - len(FILTERABLE_COLUMNS)
 
 # Nullable on purpose. The rest of listings is NOT NULL, and the distinction is
 # load-bearing: a NULL satisfies no comparison, so `rating >= 4.5` excludes
-# every unrated listing instead of including it.
+# every unrated listing instead of including it. instant_bookable joined them
+# in 0002: the snapshot stopped publishing the field, and false would have been
+# an answer the source never gave.
 NULLABLE_LISTING_COLUMNS = frozenset(
     {
         "description",
-        "price_usd",
+        "price_gbp",
         "bedrooms",
         "beds",
         "bathrooms",
         "rating",
         "location_score",
         "cleanliness_score",
+        "instant_bookable",
         "host_is_superhost",
         "doc_text",
         "embedding",
@@ -133,7 +144,7 @@ def columns_of(conn: psycopg.Connection[TupleRow], table: str) -> dict[str, tupl
 
 
 def test_migrations_create_every_expected_table(conn, migrated):
-    assert migrated == ["0001"]
+    assert migrated == ["0001", "0002"]
 
     present = {
         str(row[0])
@@ -260,7 +271,7 @@ def test_a_listing_and_its_reviews_round_trip(conn, migrated):
         INSERT INTO listings (
             source_listing_id, name, description,
             neighbourhood_id, room_type_id, property_type_id,
-            latitude, longitude, price_usd, accommodates, bedrooms, beds, bathrooms,
+            latitude, longitude, price_gbp, accommodates, bedrooms, beds, bathrooms,
             minimum_nights, rating, location_score, cleanliness_score, number_of_reviews,
             instant_bookable, host_is_superhost, amenities, doc_text, embedding
         ) VALUES (
@@ -302,7 +313,7 @@ def test_a_listing_and_its_reviews_round_trip(conn, migrated):
     )
 
     stored = conn.execute(
-        "SELECT price_usd, accommodates, amenities, embedding IS NOT NULL "
+        "SELECT price_gbp, accommodates, amenities, embedding IS NOT NULL "
         "FROM listings WHERE id = %s",
         (listing_id[0],),
     ).fetchone()

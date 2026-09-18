@@ -209,7 +209,10 @@ this, and the Answer node says so when a quality filter was applied.
 
 Full column list: `migrations/0001_initial.sql`, which is the authority on the
 column types, on which columns are nullable and why, and on how much of the
-32-key-column index budget is left for amenity booleans.
+32-key-column index budget is left for amenity booleans. `0002` amends it with
+what the snapshot turned out to contain: `price_usd` became `price_gbp`, because
+London's prices are quoted in pounds, and `instant_bookable` became nullable,
+because the scrape no longer publishes it.
 
 ## 6. What gets embedded
 
