@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from scout.llm.backend import (
+    LlmApiError,
     LlmBackend,
     LlmEmptyResponseError,
     LlmRefusalError,
@@ -23,6 +24,7 @@ from scout.llm.fake_backend import (
     FakeTurn,
     ScriptExhaustedError,
     empty_turn,
+    error_turn,
     json_turn,
     refusal_turn,
     text_turn,
@@ -106,8 +108,10 @@ def test_requests_are_recorded_for_assertions() -> None:
     assert backend.calls == [request]
 
 
-def test_the_cacheable_prefix_is_byte_identical_across_two_builds() -> None:
-    """Any drift in the system prompt or tool list silently costs money."""
+def test_the_recorded_requests_show_which_part_moved() -> None:
+    """The fake builds no prefix of its own, so this is about the record: a test
+    asserting cache stability needs the stable and volatile parts kept apart.
+    The prefix is built — and asserted byte-identical — in the real backend."""
     backend = FakeBackend([text_turn("a"), text_turn("b")])
     backend.complete(ask("first query", tools=(SEARCH_TOOL,)))
     backend.complete(ask("second query", tools=(SEARCH_TOOL,)))
@@ -303,6 +307,17 @@ def test_a_router_answers_based_on_the_request() -> None:
 
     assert backend.complete(ask("how many are there")).wants_tools
     assert backend.complete(ask("tell me a story")).text == "no idea"
+
+
+def test_a_transport_failure_can_be_scripted() -> None:
+    """So the retry-on-transport-failure path has an offline driver."""
+    failure = LlmApiError("connection reset", retryable=True)
+    backend = FakeBackend([error_turn(failure), text_turn("worked on the retry")])
+
+    with pytest.raises(LlmApiError) as caught:
+        backend.complete(ask())
+    assert caught.value is failure
+    assert backend.complete(ask()).text == "worked on the retry"
 
 
 def test_a_script_and_a_router_together_are_refused() -> None:

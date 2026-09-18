@@ -20,7 +20,10 @@ from anthropic.types import ToolUseBlock as SdkToolUseBlock
 from anthropic.types import Usage as SdkUsage
 from pydantic import BaseModel, Field, SecretStr
 
+from scout.config import Settings
 from scout.llm.anthropic_backend import (
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_S,
     AnthropicBackend,
     to_message_params,
     to_output_config,
@@ -158,19 +161,37 @@ def test_the_volatile_query_stays_out_of_the_cached_prefix() -> None:
     assert not any("cache_control" in block for m in messages for block in m["content"])
 
 
-def test_the_prefix_is_byte_identical_across_two_builds() -> None:
-    """Any drift here invalidates the cache silently; the only symptom is cost."""
+def test_the_prefix_is_byte_identical_across_different_queries() -> None:
+    """Any drift here invalidates the cache silently; the only symptom is cost.
+
+    Driven through two real calls with different user turns, because the
+    regression worth catching is something *query-derived* folded into the
+    prefix — a hash, a message count, a rendered filter set — not a timestamp.
+    Building the same literals twice could only catch the latter.
+    """
+    backend, stub = backend_for(sdk_message())
+
+    backend.complete(
+        request(
+            messages=(Message.user("quiet place near the water for two"),), tools=(SEARCH_TOOL,)
+        )
+    )
     first = json.dumps(
-        {
-            "tools": to_tool_params((SEARCH_TOOL,)),
-            "system": to_system_blocks(GROUNDING, cache=True),
-        }
+        {"tools": stub.messages.kwargs["tools"], "system": stub.messages.kwargs["system"]}
+    )
+
+    backend.complete(
+        request(
+            messages=(
+                Message.user("somewhere lively for eight, any price"),
+                Message.assistant(ToolUseBlock("toolu_1", "count_matches", {"guests": 8})),
+                Message.tool_results(ToolResultBlock("toolu_1", '{"count": 41}')),
+            ),
+            tools=(SEARCH_TOOL,),
+        )
     )
     second = json.dumps(
-        {
-            "tools": to_tool_params((SEARCH_TOOL,)),
-            "system": to_system_blocks(GROUNDING, cache=True),
-        }
+        {"tools": stub.messages.kwargs["tools"], "system": stub.messages.kwargs["system"]}
     )
 
     assert first == second
@@ -487,11 +508,13 @@ def test_an_empty_turn_raises_rather_than_returning_no_content() -> None:
 
 def test_an_unrecognised_stop_reason_raises_rather_than_reading_as_finished() -> None:
     """A stop reason the API grows later must not silently read as 'finished'."""
-    message = sdk_message()
+    message = sdk_message(usage=SdkUsage(input_tokens=40_000, output_tokens=2_000))
     message.stop_reason = cast(Any, "something_the_api_added_later")
 
-    with pytest.raises(LlmResponseError, match="unrecognised stop reason"):
+    with pytest.raises(LlmResponseError, match="unrecognised stop reason") as caught:
         to_response(message)
+    assert caught.value.usage == Usage(input_tokens=40_000, output_tokens=2_000)
+    assert caught.value.model == "claude-haiku-4-5"
 
 
 def test_a_missing_stop_reason_raises() -> None:
@@ -508,10 +531,30 @@ def test_a_truncated_turn_reports_max_tokens_rather_than_looking_complete() -> N
 
 def test_an_unreadable_content_block_raises_rather_than_being_dropped() -> None:
     class UnknownBlock:
-        type = "some_future_block"
+        type = "redacted_thinking"
 
-    message = sdk_message()
+    message = sdk_message(usage=SdkUsage(input_tokens=40_000, output_tokens=2_000))
     message.content = cast(Any, [UnknownBlock()])
 
-    with pytest.raises(LlmResponseError, match="unsupported content block"):
+    with pytest.raises(LlmResponseError, match="does not model") as caught:
         to_response(message)
+    # The turn was billed whether or not Scout could read it.
+    assert caught.value.usage == Usage(input_tokens=40_000, output_tokens=2_000)
+    assert caught.value.model == "claude-haiku-4-5"
+
+
+def test_the_client_is_given_a_bounded_timeout_and_retry_count() -> None:
+    """The SDK's own defaults are a 600-second read across three attempts, which
+    no wall clock checked between turns of the agent loop could interrupt."""
+    backend = AnthropicBackend(SecretStr("sk-ant-not-real"), timeout_s=12.0, max_retries=0)
+    client = backend._client
+
+    assert client.timeout == 12.0
+    assert client.max_retries == 0
+
+
+def test_the_default_client_ceiling_fits_inside_a_query_budget() -> None:
+    settings = Settings(_env_file=None)
+    worst_case = DEFAULT_TIMEOUT_S * (DEFAULT_MAX_RETRIES + 1)
+
+    assert worst_case <= settings.query_timeout_s

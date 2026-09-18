@@ -29,7 +29,14 @@ from scout.llm.backend import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from scout.llm.fake_backend import FakeBackend, FakeTurn, json_turn, text_turn, tool_use_turn
+from scout.llm.fake_backend import (
+    FakeBackend,
+    FakeTurn,
+    error_turn,
+    json_turn,
+    text_turn,
+    tool_use_turn,
+)
 from scout.llm.pricing import Usage, cost_usd
 from scout.llm.usage import CallRecord, UsageAccumulator
 
@@ -60,6 +67,7 @@ __all__ = [
     "UsageAccumulator",
     "build_backend",
     "cost_usd",
+    "error_turn",
     "json_turn",
     "text_turn",
     "tool_use_turn",

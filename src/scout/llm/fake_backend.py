@@ -29,6 +29,7 @@ from typing import Any
 from scout.llm.backend import (
     ContentBlock,
     LlmEmptyResponseError,
+    LlmError,
     LlmRefusalError,
     LlmRequest,
     LlmResponse,
@@ -66,6 +67,9 @@ class FakeTurn:
     usage: Usage = DEFAULT_FAKE_USAGE
     #: Set for a refusal so the backend can report the category the API would.
     refusal_category: str | None = None
+    #: Raised instead of answering. Scripts a transport failure so the retry
+    #: paths the boundary promises can be driven offline like any other turn.
+    error: LlmError | None = None
 
 
 def text_turn(text: str, *, usage: Usage = DEFAULT_FAKE_USAGE) -> FakeTurn:
@@ -118,6 +122,15 @@ def empty_turn(*, usage: Usage = DEFAULT_FAKE_USAGE) -> FakeTurn:
     return FakeTurn(content=(), stop_reason="end_turn", usage=usage)
 
 
+def error_turn(error: LlmError) -> FakeTurn:
+    """A call that fails instead of answering.
+
+    Usually an :class:`~scout.llm.backend.LlmApiError` — the transport failure a
+    caller is meant to retry. Nothing is billed, so no usage is reported.
+    """
+    return FakeTurn(content=(), usage=Usage(), error=error)
+
+
 class FakeBackend:
     """A scripted :class:`~scout.llm.backend.LlmBackend`.
 
@@ -153,6 +166,8 @@ class FakeBackend:
         """Hand back the next scripted turn, applying the protocol's contract."""
         self.calls.append(request)
         turn = self._next_turn(request)
+        if turn.error is not None:
+            raise turn.error
         content = tuple(self._assign_ids(block) for block in turn.content)
 
         if turn.stop_reason == "refusal":

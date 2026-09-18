@@ -61,6 +61,14 @@ from scout.llm.pricing import Usage
 
 _STOP_REASONS: frozenset[str] = frozenset(get_args(StopReason))
 
+# The SDK defaults to a 600-second read timeout and two retries — half an hour
+# against a per-query budget of sixty seconds. A wall clock checked between turns
+# of the agent loop cannot interrupt a blocked socket, so the ceiling has to sit
+# on the client itself. The node that owns the budget should pass its own figures
+# derived from `query_timeout_s`; these are only a safe default.
+DEFAULT_TIMEOUT_S = 30.0
+DEFAULT_MAX_RETRIES = 1
+
 # 408 and 409 are transient by definition; 429 and 5xx are the rate limit and the
 # server's own trouble. Everything else is a request that will fail the same way
 # however many times it is sent.
@@ -74,8 +82,19 @@ class AnthropicBackend:
     tested against a stub. No test constructs a real client, and none may.
     """
 
-    def __init__(self, api_key: SecretStr, *, client: anthropic.Anthropic | None = None) -> None:
-        self._client = client or anthropic.Anthropic(api_key=api_key.get_secret_value())
+    def __init__(
+        self,
+        api_key: SecretStr,
+        *,
+        client: anthropic.Anthropic | None = None,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ) -> None:
+        self._client = client or anthropic.Anthropic(
+            api_key=api_key.get_secret_value(),
+            timeout=timeout_s,
+            max_retries=max_retries,
+        )
 
     def complete(self, request: LlmRequest) -> LlmResponse:
         """Run one turn against the API."""
@@ -108,8 +127,10 @@ class AnthropicBackend:
         except anthropic.APIConnectionError as exc:
             raise LlmApiError(f"could not reach the Anthropic API: {exc}", retryable=True) from exc
         except anthropic.AnthropicError as exc:
-            # Credential and client-side configuration failures. Retrying the
-            # same call cannot fix them.
+            # Whatever the clauses above did not name: credential and federation
+            # failures, a response the SDK could not validate, and the SDK's own
+            # retryable errors — which land here only once its retries are spent.
+            # None of them is worth Scout trying the identical call again.
             raise LlmApiError(f"Anthropic client failure: {exc}", retryable=False) from exc
 
         return to_response(message, response_schema=request.response_schema)
@@ -225,10 +246,14 @@ def to_response(message: AnthropicMessage, *, response_schema: Any | None = None
     if stop_reason is None or stop_reason not in _STOP_REASONS:
         raise LlmResponseError(
             f"unrecognised stop reason {stop_reason!r}; Scout branches on this value, "
-            f"so treating it as 'finished' would report a truncated run as a complete one"
+            f"so treating it as 'finished' would report a truncated run as a complete one",
+            model=message.model,
+            usage=usage,
         )
 
-    content = tuple(_from_block(block) for block in message.content)
+    content = tuple(
+        _from_block(block, model=message.model, usage=usage) for block in message.content
+    )
     if not content:
         raise LlmEmptyResponseError(
             f"the model returned no content blocks (stop reason {stop_reason!r})",
@@ -254,11 +279,17 @@ def to_response(message: AnthropicMessage, *, response_schema: Any | None = None
     )
 
 
-def _from_block(block: AnthropicContentBlock) -> ContentBlock:
+def _from_block(block: AnthropicContentBlock, *, model: str, usage: Usage) -> ContentBlock:
     """One response block in Scout's own vocabulary.
 
     An unrecognised block type raises rather than being dropped: silently losing
-    part of an answer is indistinguishable from the model having said less.
+    part of an answer is indistinguishable from the model having said less. The
+    call's cost rides along, because the turn was billed whether or not Scout
+    could read it.
+
+    The block Scout is most likely to meet here is ``redacted_thinking``, which
+    extended thinking emits when the reasoning is flagged. Nothing turns thinking
+    on today; the node that does has to handle it.
     """
     if block.type == "text":
         return TextBlock(block.text)
@@ -269,8 +300,10 @@ def _from_block(block: AnthropicContentBlock) -> ContentBlock:
             id=block.id, name=block.name, arguments=dict(cast(Mapping[str, Any], block.input))
         )
     raise LlmResponseError(
-        f"unsupported content block {block.type!r} in the assistant turn; Scout declares "
-        f"no server-side tools, so this is a response shape it was not built to read"
+        f"content block {block.type!r} in the assistant turn is one Scout does not model, "
+        f"so part of this answer cannot be read",
+        model=model,
+        usage=usage,
     )
 
 
