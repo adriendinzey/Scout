@@ -94,7 +94,7 @@ This repository never modifies Brindle.
 
 `type(scope): summary`, where `type` is one of
 `feat | fix | test | docs | refactor | chore | perf | ci` — for example
-`feat(graph): check node with rule-enforced relaxation limits`. Add a body when
+`feat(graph): explicit tool loop with enforced budgets`. Add a body when
 the change needs context.
 
 ## Changelog
