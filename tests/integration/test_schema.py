@@ -321,17 +321,18 @@ def test_a_listing_and_its_reviews_round_trip(conn, migrated):
 
 def test_a_null_attribute_satisfies_no_comparison(conn, migrated):
     """`rating >= 4.5` excludes unrated listings. Parse and Check depend on it."""
-    conn.execute(
-        """
-        INSERT INTO neighbourhoods (name) VALUES ('Nullington')
-        ON CONFLICT (name) DO NOTHING
-        """
-    )
+    # Inserted here rather than leaned on from another test: a test that only
+    # passes when the whole module runs in order is not much of a test.
     ids = conn.execute(
         """
-        SELECT (SELECT id FROM neighbourhoods WHERE name = 'Nullington'),
-               (SELECT id FROM room_types LIMIT 1),
-               (SELECT id FROM property_types LIMIT 1)
+        WITH n AS (
+            INSERT INTO neighbourhoods (name) VALUES ('Nullington') RETURNING id
+        ), r AS (
+            INSERT INTO room_types (name) VALUES ('Private room') RETURNING id
+        ), p AS (
+            INSERT INTO property_types (name) VALUES ('Private room in home') RETURNING id
+        )
+        SELECT n.id, r.id, p.id FROM n, r, p
         """
     ).fetchone()
     assert ids and all(value is not None for value in ids)
@@ -354,3 +355,6 @@ def test_a_null_attribute_satisfies_no_comparison(conn, migrated):
     assert matched == (0,), "a NULL rating must satisfy no comparison"
 
     conn.execute("DELETE FROM listings WHERE source_listing_id = %s", (987654321,))
+    conn.execute("DELETE FROM neighbourhoods WHERE name = 'Nullington'")
+    conn.execute("DELETE FROM room_types WHERE name = 'Private room'")
+    conn.execute("DELETE FROM property_types WHERE name = 'Private room in home'")

@@ -23,6 +23,15 @@ Notable changes to Scout. Format loosely follows
 - Cost accounting with published per-model rates, prompt-cache and Batch-API
   discounts, so every run can report dollars alongside tokens.
 - `scout doctor`, which verifies the database and both extensions.
+- `scout data migrate`, which applies the numbered SQL migrations in
+  `migrations/` and records them in `schema_migrations`. Running it again is
+  a no-op; a migration edited after it was applied, or recorded with no file
+  left in the repository, is an error rather than a silent divergence.
+- The schema Scout searches: `listings`, `reviews`, and the neighbourhood,
+  room-type, property-type and amenity lookup tables. Filterable columns are
+  typed for Brindle pushdown, personal fields are absent by construction
+  rather than nulled, and the index key budget leaves room for 15 amenity
+  booleans alongside the vector and the 16 other filters.
 - Integration tests asserting the project's premise: a predicate is pushed into
   the Brindle index as an `Index Cond` rather than applied as a post-scan
   `Filter`, across every supported predicate shape; returned rows satisfy the

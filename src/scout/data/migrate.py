@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )
 """
 
+# Session-level, so one lock spans the several transactions a run applies. The
+# key is derived from a name rather than being a magic number, so an unrelated
+# advisory lock elsewhere cannot collide with it by accident.
+_LOCK = "SELECT pg_advisory_lock(hashtext('scout.schema_migrations'))"
+_UNLOCK = "SELECT pg_advisory_unlock(hashtext('scout.schema_migrations'))"
+
 Connection = psycopg.Connection[TupleRow]
 
 
@@ -170,7 +176,8 @@ def apply_migrations(conn: Connection, directory: Path | None = None) -> list[st
 
     Each migration runs in its own transaction with its bookkeeping row, so a
     failure half way through a run leaves the migrations before it applied and
-    recorded, and the failing one not applied at all.
+    recorded, and the failing one not applied at all. A session advisory lock
+    serializes concurrent runs against the same database.
 
     Returns:
         The versions applied, in order. Empty when the schema was already
@@ -182,27 +189,36 @@ def apply_migrations(conn: Connection, directory: Path | None = None) -> list[st
     """
     migrations = load_migrations(directory if directory is not None else default_migrations_dir())
 
+    # Reading the history and acting on it has to be one step. Without the
+    # lock, two concurrent runs both see the same work as pending and the
+    # loser fails with "relation already exists" -- which reads as a broken
+    # migration file rather than as the race it actually is.
+    conn.execute(_LOCK)
     try:
-        with conn.transaction():
-            conn.execute(_BOOKKEEPING_DDL)
-        applied = _recorded_checksums(conn)
-    except psycopg.Error as exc:
-        raise MigrationError(f"could not read the migration history: {exc}") from exc
-
-    pending = pending_migrations(migrations, applied)
-    for migration in pending:
         try:
             with conn.transaction():
-                # The statement text is a static file in this repository, not
-                # anything assembled from input; the bookkeeping row that
-                # records it is parameterized.
-                conn.execute(migration.sql)
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, name, checksum) VALUES (%s, %s, %s)",
-                    (migration.version, migration.name, migration.checksum),
-                )
+                conn.execute(_BOOKKEEPING_DDL)
+            applied = _recorded_checksums(conn)
         except psycopg.Error as exc:
-            raise MigrationError(f"{migration.filename} failed to apply: {exc}") from exc
+            raise MigrationError(f"could not read the migration history: {exc}") from exc
+
+        pending = pending_migrations(migrations, applied)
+        for migration in pending:
+            try:
+                with conn.transaction():
+                    # The statement text is a static file in this repository, not
+                    # anything assembled from input; the bookkeeping row that
+                    # records it is parameterized.
+                    conn.execute(migration.sql)
+                    conn.execute(
+                        "INSERT INTO schema_migrations (version, name, checksum) "
+                        "VALUES (%s, %s, %s)",
+                        (migration.version, migration.name, migration.checksum),
+                    )
+            except psycopg.Error as exc:
+                raise MigrationError(f"{migration.filename} failed to apply: {exc}") from exc
+    finally:
+        conn.execute(_UNLOCK)
 
     return [migration.version for migration in pending]
 
@@ -215,7 +231,10 @@ def run_migrations(database_url: str, directory: Path | None = None) -> list[str
     """
     try:
         conn = psycopg.connect(database_url, autocommit=True)
-    except psycopg.OperationalError as exc:
+    except psycopg.Error as exc:
+        # An unreachable server, but also a malformed DSN, which arrives as a
+        # ProgrammingError -- both mean "the configured database is unusable",
+        # and both belong in the CLI's error path rather than in a traceback.
         raise MigrationError(f"could not connect to {_describe(database_url)}: {exc}") from exc
     with conn:
         return apply_migrations(conn, directory)
