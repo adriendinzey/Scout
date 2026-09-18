@@ -40,6 +40,14 @@ Notable changes to Scout. Format loosely follows
 - Parallel-development tooling: `scripts/worktree.sh` gives each task its own
   worktree, virtualenv, and Postgres container on a free port;
   `scripts/db.sh` wraps Compose with the sandbox's settings.
+- The filter vocabulary and the mapping from it to SQL: a validated `Filters`
+  model where `None` means unconstrained, and a builder that composes one
+  parameterized filtered-vector query per disjunction branch. Fan-out is capped;
+  past the cap, and for an amenity with no indexed column, the plan applies the
+  condition after the scan and **records that it did**, because that weakens
+  recall and a silent fallback would corrupt the evaluation. Filters that
+  exclude NULLs are reported back, since a comparison against NULL is never
+  true and the answer has to say so.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
 
