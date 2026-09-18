@@ -33,8 +33,9 @@ from scout.llm.pricing import Usage
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "scout"
 
-#: The one module allowed to know the SDK exists.
-SDK_FACING = {"anthropic_backend.py"}
+#: The one module allowed to know the SDK exists, by path — a basename would
+#: exempt any future `*/anthropic_backend.py` anywhere in the package.
+SDK_FACING = {Path("llm/anthropic_backend.py")}
 
 
 def imported_modules(path: Path) -> set[str]:
@@ -57,7 +58,7 @@ def test_only_one_module_imports_the_sdk() -> None:
     offenders = sorted(
         str(path.relative_to(SRC))
         for path in SRC.rglob("*.py")
-        if path.name not in SDK_FACING and "anthropic" in imported_modules(path)
+        if path.relative_to(SRC) not in SDK_FACING and "anthropic" in imported_modules(path)
     )
 
     assert offenders == []
@@ -79,7 +80,8 @@ def test_the_default_backend_cannot_spend_money() -> None:
 
 
 def test_the_real_backend_is_chosen_deliberately() -> None:
-    """Constructing the client sends nothing; the key is never used here."""
+    """Constructing a client opens no connection — and could not, since a unit
+    test has no socket."""
     settings = Settings(
         _env_file=None, llm_backend="anthropic", anthropic_api_key=SecretStr("sk-ant-not-real")
     )
