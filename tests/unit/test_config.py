@@ -18,7 +18,7 @@ def test_candidate_pool_above_ef_search_is_rejected() -> None:
     """Brindle returns at most ef_search rows from a ranked scan.
 
     Asking for more does not error at the database — it quietly returns fewer
-    rows, which the Check node would misread as a genuinely thin result.
+    rows, which the agent would misread as a genuinely thin result.
     """
     with pytest.raises(ValidationError, match="exceeds ef_search"):
         Settings(_env_file=None, ef_search=64, candidate_pool=100)

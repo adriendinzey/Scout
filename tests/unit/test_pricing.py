@@ -40,5 +40,5 @@ def test_every_configured_default_model_has_a_rate() -> None:
     from scout.config import Settings
 
     settings = Settings(_env_file=None)
-    for model in (settings.model_parse, settings.model_check, settings.model_answer):
+    for model in (settings.model_parse, settings.model_agent, settings.model_answer):
         assert model in RATES, f"{model} has no rate"

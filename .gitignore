@@ -29,6 +29,10 @@ htmlcov/
 # Evaluation run outputs (reports are published deliberately, not by default)
 /eval/runs/
 
+# Per-run traces. A step record quotes listing and review text, so these are
+# local artifacts, never committed.
+/runs/
+
 # Local model cache (sentence-transformers downloads into here if pointed at it)
 /.models/
 
