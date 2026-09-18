@@ -31,15 +31,22 @@ Planning lives outside the shipped code and must never leak into it:
 - Errors from the LLM, the database, and the embedding model surface with enough
   context to say *which* call failed and *with what input*.
 - A failure must never be reported as an empty result. "No listings matched" and
-  "the query errored" look identical to the Check node and would send it relaxing
+  "the query errored" look identical to the agent and would send it loosening
   filters to fix a broken connection.
+- **A tool distinguishes the two.** A model mistake — bad filters, an unknown
+  field, a guest-count violation — is a structured `ToolError` returned to the
+  model so it can correct itself. A database or API failure raises with context
+  and ends the run. Never collapse those into one thing.
 
 ## Types
 
 - `mypy --strict` passes on `src/`. No `Any` without a comment justifying it.
 - Pydantic models validate every LLM output and every external input before use.
-- Use `Literal` for closed sets (backends, relaxation strategies) so an invalid
-  value fails at load, not at the third node.
+- Use `Literal` for closed sets (backends, modes, stop reasons, relaxation
+  strategies) so an invalid value fails at load, not at the third node.
+- Tool inputs are Pydantic models, and their JSON schemas are **generated from
+  those models** — a hand-written schema drifts from the validator it describes,
+  and then the model gets rejected for obeying the schema it was given.
 
 ## SQL
 
@@ -56,6 +63,10 @@ Planning lives outside the shipped code and must never leak into it:
 - Model IDs come from settings. **Never hardcode a model ID in a node.**
 - Every call records token usage so it can be priced.
 - **No test calls the real API.** Not in CI, not locally by default.
+- **A limit that lives only in the prompt is not a limit.** Every budget the agent
+  runs inside — tool calls, searches, cost, wall clock, the guest-count floor — is
+  a pure function with a test that fails if it is removed. Tell the model its
+  budget so it can plan; enforce it in code so the guarantee is true.
 
 ## Privacy
 

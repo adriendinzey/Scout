@@ -106,6 +106,31 @@ See `docs/ARCHITECTURE.md` § Schema for the full table definitions. In summary:
   `SCOUT_MAX_REVIEWS_PER_LISTING` (default 5, most recent). **No reviewer name,
   no reviewer ID.**
 - **Lookup tables** — neighbourhoods, room types, property types, amenities.
+- **`runs` and `run_steps`** — what each query did: the query text, the mode, the
+  tools called, truncated input and output summaries, timings, tokens, and cost.
+  A step summary can quote listing and review text, so **the scrubber runs before
+  a summary is written**, not before it is displayed. The same records are written
+  as one JSONL file per run under `SCOUT_TRACE_DIR`, which is gitignored — a
+  trace is a local artifact and is never committed.
+- **No secrets in the stored settings snapshot.** The run record keeps the
+  configuration so a report can be reproduced; the API key is excluded, and a test
+  asserts it.
+
+### Data that leaves the machine
+
+Two paths, both deliberate:
+
+1. **The Anthropic API.** The query, the grounding block, tool definitions, and
+   tool results — which include listing fields and scrubbed review excerpts — are
+   sent to Claude. That is inherent to the product.
+2. **LangSmith, only if `LANGSMITH_API_KEY` is set.** Optional in the strict
+   sense: unset, nothing is imported and nothing is sent. When it is set, it
+   receives the same scrubbed, truncated summaries the local trace holds — never
+   more. It is a convenience view, never the record a published number is drawn
+   from.
+
+Nothing else sends data anywhere. Scout does not fetch from Inside Airbnb at
+runtime, and it has no telemetry.
 
 ## 6. Enforcement
 
@@ -114,6 +139,9 @@ This is checked, not trusted:
 - A test asserts that no column whose name matches the dropped-fields list exists
   in any Scout table.
 - A test asserts the name scrubber removes names from a fixture of review text.
+- A test asserts no personal name reaches the run store, and that nothing under
+  `SCOUT_TRACE_DIR` is tracked by git.
+- A test asserts no API key appears in a run's stored settings snapshot.
 - The PR template has a privacy checkbox.
 - `.gitignore` covers the data directories, and the bug-report template asks
   reporters not to paste personal data into issues.

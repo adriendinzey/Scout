@@ -35,7 +35,7 @@ be judged against what is actually in the corpus, rather than from imagination.
 | Disjunctions ("Hackney or Islington") | Exercises the fan-out path Brindle cannot push down |
 | Unsupported constraints ("free in June") | Must be reported, not silently dropped |
 | Contradictory requests ("cheap luxury penthouse under $40") | The loop should give up gracefully and say why |
-| Very few true matches | The case the Check loop exists for |
+| Very few true matches | The case the loop exists for — does the agent notice, and what does it do about it? |
 | Quality filters over sparse data ("well reviewed") | Exposes the NULL-excludes-everything trap |
 
 **Storage:** queries and expected filters are committed — they are original text.
@@ -70,16 +70,49 @@ Reported: **recall@10** against exact, **precision@5** against the labels, and
 > one-time index-decode cost. Quoting only warm latency would flatter Scout;
 > quoting only cold would flatter the baselines. Both, always.
 
-### Agent loop
+### Agent behaviour
 
-- Share of queries ending with ≥ 5 results — with the Check loop, without it, and
-  with the LLM relaxer vs the rule-based one.
-- Precision@5 of the final answers under each variant.
-- **LLM calls, tokens, and dollars per query** under each variant.
+Read from the stored run steps, so these are counts of what happened rather than
+impressions of it:
 
-That last row is the point of the comparison: a loop that buys two points of
+- **Tool calls per query**, and **`search_listings` calls per query** — mean and
+  distribution.
+- **Which tools get used at all.** A tool the model never calls is either badly
+  described or not worth its schema tokens.
+- **How runs end:** Claude finished · tool-call limit · search limit · cost
+  ceiling · timeout · error. A healthy distribution is mostly "finished"; a large
+  limit share means the limits are doing the model's job for it.
+- **Invalid tool arguments** — rate of calls rejected by the input model or by the
+  guest-count rule, before and after the model's self-correction.
+- **Repeated identical calls** — rate of calls served from the repeat cache.
+
+### Agent versus fixed
+
+The whole eval set is run in **both modes**, plus `--mode fixed --no-relax` as the
+"no loop at all" control. Same queries, same parsed filters, same corpus:
+
+| | share ending with ≥ 5 results | precision@5 vs labels | p50 / p95 latency | tokens / query | **USD / query** |
+|---|---|---|---|---|---|
+| `--mode agent` | | | | | |
+| `--mode fixed` | | | | | |
+| `--mode fixed --no-relax` | | | | | |
+
+That last column is the point of the comparison. An agent that buys two points of
 precision at triple the cost and double the latency is a trade-off to state, not
-an unambiguous win.
+an unambiguous win — **and if `fixed` wins on quality and costs less, the README
+says exactly that**, in the same typeface as anything favourable.
+
+### Prompt regression (runs in CI)
+
+A small set of queries with their expected parsed filters, checked against
+**recorded** Claude responses with the backend faked — no network, no key, no
+cost. A change to the Parse prompt, the grounding block, or the filter schema that
+breaks the mapping fails the build rather than being discovered in an eval run
+weeks later.
+
+The same recorded-response approach covers the agent loop's shape: a scripted
+sequence of tool-use turns asserts that the loop executes them, enforces its
+limits, and still reaches an answer.
 
 ## 4. Keeping it cheap
 
@@ -93,12 +126,16 @@ variants, repeated whenever something changes. Three things keep that affordable
    results does not mean paying to re-run.
 
 The harness estimates projected spend **before** it starts and refuses to exceed
-`SCOUT_MAX_RUN_COST_USD`.
+`SCOUT_MAX_RUN_COST_USD`. Within a run, each query is separately capped by
+`SCOUT_MAX_QUERY_COST_USD`, priced from real token counts as the loop runs — so a
+single pathological query cannot eat the run's budget, and the report shows how
+many queries hit the ceiling.
 
 ## 5. What the report contains
 
 - The run manifest (§1) — without it the numbers are not reproducible.
 - Each metric in §3, with the sample size beside it.
+- **Total cost of the run, and cost per query**, per mode.
 - Index build times and the measured per-backend memory.
 - A plain-language summary including anything that went **against** the
   hypothesis.

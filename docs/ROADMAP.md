@@ -20,11 +20,22 @@ cold/warm latency and backend memory measured.*
 Natural language → validated filters → filtered vector search, with a trace.
 *Exit: `scout ask` returns filtered results from Brindle for a real query.*
 
-## M3 — Check loop ⬜ *(priority)*
-The agentic part: the model decides which constraint to loosen when results are
-thin, fenced by rules the code enforces. Plus a rule-based relaxer to compare
-against.
-*Exit: an over-constrained query shows a reasoned relaxation and ends with results.*
+## M3 — Agent tool loop ⬜ *(priority)*
+The agentic part: Claude is given five tools — search, count matches, field
+stats, listing detail, reviews — and chooses which to call next, including
+whether to search again with different filters. Fenced by limits the code
+enforces, not the prompt. The hardcoded search-then-relax path stays behind
+`--mode fixed` as the baseline it gets measured against.
+*Exit: an over-constrained query shows the agent checking counts, changing its
+filters for a stated reason, and ending with results — and `--mode fixed` still
+runs.*
+
+## M3.5 — Tracing and cost ⬜
+Every run records each step with its latency, tokens, and dollars, stored in
+Postgres and as a JSONL file. `scout trace <run_id>` and `scout runs` read them
+back; `scout ask` prints what the query cost.
+*Exit: traces are stored and replayable, and a test proves the per-query cost
+ceiling stops a loop.*
 
 ## M4 — Answer ⬜
 Ranking, review citations, and transparency about what was relaxed and what could
@@ -33,8 +44,10 @@ not be satisfied.
 
 ## M5 — Evaluation ⬜
 The numbers: parse accuracy, retrieval quality against pgvector and exact search,
-and whether the retry loop actually helps.
-*Exit: one command produces the full report from a single run.*
+how the agent actually behaves (tool calls per query, how runs end), and whether
+letting the model choose tools beats the hardcoded path — on quality, latency and
+dollars.
+*Exit: one command produces the full report from a single run, in both modes.*
 
 ## M6 — Stretch ⬜
 Web UI, a hosted demo behind hard spending guardrails, and a learned reranker
@@ -43,5 +56,6 @@ evaluated against plain vector ranking. Only after M5.
 ---
 
 Scope, including what is deliberately **out** of scope, is fixed in the build
-spec. Notable exclusions: no prebuilt LangGraph agents, reviews are not indexed
-as their own rows in v1, and no changes to Brindle from this repo.
+spec. Notable exclusions: no prebuilt agent helpers — the tool loop is written
+out explicitly — reviews are not indexed as their own rows in v1, and no changes
+to Brindle from this repo.
