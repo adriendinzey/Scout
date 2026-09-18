@@ -9,7 +9,7 @@ authors = [{ name = "Adrien Dinzey" }]
 
 dependencies = [
     "langgraph>=1.0,<2.0",
-    "anthropic>=0.40",
+    "anthropic>=1.6",
     "psycopg[binary,pool]>=3.3.5",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
