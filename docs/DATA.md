@@ -69,6 +69,7 @@ not stored "just in case".
 | `host_name` | A personal name |
 | `host_about`, `host_thumbnail_url`, `host_picture_url` | Personal profile content |
 | `host_url`, `listing_url` | Resolve back to a profile |
+| `host_profile_id`, `host_profile_url` | Added by a later snapshot; resolve to a profile |
 | `reviewer_id` | Identifies a person |
 | `reviewer_name` | A personal name |
 
@@ -101,7 +102,12 @@ add a feature whose value depends on them being exact.
 See `docs/ARCHITECTURE.md` § Schema for the full table definitions. In summary:
 
 - **`listings`** — the searchable unit: text, typed attributes, amenity booleans,
-  the embedded `doc_text`, and the vector.
+  the embedded `doc_text`, and the vector. Two columns carry a caveat the load
+  found in the file rather than in the data dictionary: **`price_gbp` is in
+  pounds**, the currency London's snapshot quotes despite printing a dollar
+  sign, and **`instant_bookable` is NULL for every row**, because the scrape has
+  stopped publishing the field. NULL is the honest value — a NULL satisfies no
+  comparison, so a filter on it returns nothing rather than something invented.
 - **`reviews`** — `listing_id`, `date`, `comments`. Capped at
   `SCOUT_MAX_REVIEWS_PER_LISTING` (default 5, most recent). **No reviewer name,
   no reviewer ID.**
