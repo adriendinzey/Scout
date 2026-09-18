@@ -186,7 +186,7 @@ def test_a_ranked_scan_returns_at_most_ef_search_rows(
     """LIMIT above ef_search silently under-returns rather than erroring.
 
     This is the trap scout.config guards against: ask for 100 candidates with
-    ef_search at 10 and you get 10, which the Check node would misread as a
+    ef_search at 10 and you get 10, which the agent would misread as a
     genuinely thin result and start relaxing filters to fix.
     """
     conn.execute("SET brindle.ef_search = 10")
@@ -204,7 +204,7 @@ def test_null_attributes_satisfy_no_comparison(
 ) -> None:
     """`rating >= 4.5` silently drops every unrated listing.
 
-    Scout's Parse and Check nodes have to know this, and the Answer node has to
+    Scout's Parse node and its agent have to know this, and the Answer node has to
     say so — otherwise a quality filter quietly excludes new listings and the
     user is never told.
     """

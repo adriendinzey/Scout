@@ -21,6 +21,9 @@ dependencies = [
 # sentence-transformers drags in torch (~2 GB). Kept out of the default install
 # so CI, lint, and unit tests stay fast; only the embed pipeline needs it.
 embed = ["sentence-transformers>=3.3"]
+# Mirroring traces to LangSmith is optional by design: Scout's own tracing is
+# complete without it, and no test may depend on it.
+trace = ["langsmith>=0.1"]
 
 [project.scripts]
 scout = "scout.cli:app"

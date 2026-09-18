@@ -2113,6 +2113,9 @@ dependencies = [
 embed = [
     { name = "sentence-transformers" },
 ]
+trace = [
+    { name = "langsmith" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2126,6 +2129,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.40" },
     { name = "langgraph", specifier = ">=1.0,<2.0" },
+    { name = "langsmith", marker = "extra == 'trace'", specifier = ">=0.1" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.5" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -2133,7 +2137,7 @@ requires-dist = [
     { name = "sentence-transformers", marker = "extra == 'embed'", specifier = ">=3.3" },
     { name = "typer", specifier = ">=0.15" },
 ]
-provides-extras = ["embed"]
+provides-extras = ["embed", "trace"]
 
 [package.metadata.requires-dev]
 dev = [

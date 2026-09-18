@@ -55,10 +55,16 @@ def doctor() -> None:
 
     print(f"scout {__version__}")
     print(f"  llm backend    : {settings.llm_backend}")
-    print(f"  parse / check  : {settings.model_parse} / {settings.model_check}")
+    print(f"  parse / agent  : {settings.model_parse} / {settings.model_agent}")
     print(f"  answer         : {settings.model_answer}")
     print(f"  embedding      : {settings.embedding_model} ({settings.embedding_dims}d)")
     print(f"  ef_search      : {settings.ef_search} (candidate pool {settings.candidate_pool})")
+    print(f"  mode           : {settings.mode}")
+    print(
+        f"  agent limits   : {settings.max_tool_calls} tool calls, "
+        f"{settings.max_searches} searches, ${settings.max_query_cost_usd:.2f}, "
+        f"{settings.query_timeout_s:.0f}s"
+    )
 
     if settings.llm_backend == "anthropic" and settings.anthropic_api_key is None:
         typer.secho("  ANTHROPIC_API_KEY is not set", fg=typer.colors.RED, err=True)
@@ -107,35 +113,47 @@ def _check_database(settings: Settings) -> bool:
 @app.command()
 def ask(
     query: Annotated[str, typer.Argument(help="What you are looking for, in plain English.")],
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode",
+            help="agent: Claude chooses which tool to call. fixed: the hardcoded path.",
+        ),
+    ] = "agent",
     json_output: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
-    no_relax: Annotated[
-        bool, typer.Option("--no-relax", help="Disable the Check loop, for comparisons.")
+    trace: Annotated[
+        bool,
+        typer.Option("--trace", help="Print the step table: latency, tokens, and cost per step."),
     ] = False,
-    relaxer: Annotated[
-        str, typer.Option("--relaxer", help="Relaxation strategy: rules or llm.")
-    ] = "llm",
+    no_relax: Annotated[
+        bool,
+        typer.Option(
+            "--no-relax", help="Fixed mode only: search once, never relax. For comparison."
+        ),
+    ] = False,
 ) -> None:
     """Search listings with a natural-language request."""
-    del query, json_output, no_relax, relaxer
+    del query, mode, json_output, trace, no_relax
     raise NotImplementedYetError("scout ask", "M2")
 
 
-@data_app.command("migrate")
-def data_migrate() -> None:
-    """Create or update Scout's schema. Safe to run again; a no-op when current."""
-    settings = get_settings()
-    try:
-        applied = run_migrations(settings.database_url)
-    except MigrationError as exc:
-        typer.secho(f"migration failed: {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+@app.command()
+def trace(
+    run_id: Annotated[str, typer.Argument(help="The run to replay, as printed by `scout ask`.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Machine-readable output.")] = False,
+) -> None:
+    """Print a stored run: every step, its latency, tokens, and cost."""
+    del run_id, json_output
+    raise NotImplementedYetError("scout trace", "M3.5")
 
-    if not applied:
-        print("schema is up to date; nothing to apply")
-        return
-    for version in applied:
-        print(f"applied {version}")
-    typer.secho(f"applied {len(applied)} migration(s)", fg=typer.colors.GREEN)
+
+@app.command()
+def runs(
+    last: Annotated[int, typer.Option("--last", help="How many recent runs to list.")] = 20,
+) -> None:
+    """List recent runs with their query, mode, step count, latency, and cost."""
+    del last
+    raise NotImplementedYetError("scout runs", "M3.5")
 
 
 @data_app.command("load")
@@ -154,6 +172,24 @@ def data_embed() -> None:
 def data_index() -> None:
     """Build the Brindle index and the pgvector baselines, recording build times."""
     raise NotImplementedYetError("scout data index", "M1")
+
+
+@data_app.command("migrate")
+def data_migrate() -> None:
+    """Create or update Scout's schema. Safe to run again; a no-op when current."""
+    settings = get_settings()
+    try:
+        applied = run_migrations(settings.database_url)
+    except MigrationError as exc:
+        typer.secho(f"migration failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not applied:
+        print("schema is up to date; nothing to apply")
+        return
+    for version in applied:
+        print(f"applied {version}")
+    typer.secho(f"applied {len(applied)} migration(s)", fg=typer.colors.GREEN)
 
 
 def main() -> int:
