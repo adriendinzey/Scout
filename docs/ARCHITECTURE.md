@@ -109,7 +109,9 @@ Nullability is load-bearing: **a NULL satisfies no comparison**, so `rating >= 4
 silently excludes every listing with no rating. Parse and Check both have to know
 this, and the Answer node says so when a quality filter was applied.
 
-Full column list: `SCOUT_SPEC.md` § 5.2 and the migration that creates it.
+Full column list: `migrations/0001_initial.sql`, which is the authority on the
+column types, on which columns are nullable and why, and on how much of the
+32-key-column index budget is left for amenity booleans.
 
 ## 6. What gets embedded
 

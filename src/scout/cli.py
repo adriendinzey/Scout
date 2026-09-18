@@ -13,6 +13,7 @@ import typer
 
 from scout import __version__
 from scout.config import Settings, get_settings
+from scout.data.migrate import MigrationError, run_migrations
 
 app = typer.Typer(
     name="scout",
@@ -117,6 +118,24 @@ def ask(
     """Search listings with a natural-language request."""
     del query, json_output, no_relax, relaxer
     raise NotImplementedYetError("scout ask", "M2")
+
+
+@data_app.command("migrate")
+def data_migrate() -> None:
+    """Create or update Scout's schema. Safe to run again; a no-op when current."""
+    settings = get_settings()
+    try:
+        applied = run_migrations(settings.database_url)
+    except MigrationError as exc:
+        typer.secho(f"migration failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not applied:
+        print("schema is up to date; nothing to apply")
+        return
+    for version in applied:
+        print(f"applied {version}")
+    typer.secho(f"applied {len(applied)} migration(s)", fg=typer.colors.GREEN)
 
 
 @data_app.command("load")
