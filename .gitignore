@@ -40,6 +40,10 @@ htmlcov/
 .env
 .env.local
 
+# Per-sandbox Postgres settings written by scripts/worktree.sh (port + Compose
+# project name). Local to one worktree and meaningless anywhere else.
+/.sandbox/
+
 # Editors / OS
 .idea/
 .vscode/
