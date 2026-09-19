@@ -48,6 +48,22 @@ Notable changes to Scout. Format loosely follows
   recall and a silent fallback would corrupt the evaluation. Filters that
   exclude NULLs are reported back, since a comparison against NULL is never
   true and the answer has to say so.
+- The LLM boundary every node uses to reach Claude: one multi-turn call shape that
+  carries `tool_use` and `tool_result` blocks and reports its stop reason, so the
+  agent loop and the single-turn Parse call are the same call rather than two
+  interfaces. Behind it sit the real Anthropic client — which marks the stable
+  prefix cacheable, tool definitions and grounding block together, while the
+  query stays outside it — and a deterministic fake that scripts a whole
+  tool-use conversation with no network. The fake is the default, so an
+  unconfigured checkout still cannot spend money, and no test reaches the
+  network: the unit suite has its sockets taken away rather than being trusted
+  not to use them. Structured output is requested as a JSON schema; prose is
+  never parsed. **No failure is reported as an empty result** — an API error, a
+  refusal, a body truncated at `max_tokens`, and output that does not match the
+  schema each raise their own error, and the ones that follow a billed call
+  carry their token counts, so a run's cost is not understated by exactly the
+  calls that went wrong. Token and dollar totals accumulate per run, broken down
+  by node and by model.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
 
