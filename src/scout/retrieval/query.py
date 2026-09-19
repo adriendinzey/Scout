@@ -55,7 +55,8 @@ _MIN_COS_LATITUDE: Final = 1e-6
 # SQL, surprising to a reader, so a built plan reports which ones it applied.
 _NULLABLE_COLUMNS: Final[frozenset[str]] = frozenset(
     {
-        "price_usd",
+        "price_gbp",
+        "instant_bookable",
         "bedrooms",
         "beds",
         "bathrooms",
@@ -77,7 +78,7 @@ DEFAULT_SELECT_COLUMNS: Final[tuple[str, ...]] = (
     "property_type_id",
     "latitude",
     "longitude",
-    "price_usd",
+    "price_gbp",
     "accommodates",
     "bedrooms",
     "beds",
@@ -102,8 +103,8 @@ class _ScalarSpec:
 # Field -> column -> operator, as data. Iteration order fixes the order
 # conditions appear in, so the same filter set always composes the same SQL.
 _SCALAR_FILTERS: Final[Mapping[str, _ScalarSpec]] = {
-    "min_price": _ScalarSpec("price_usd", sql.SQL(">=")),
-    "max_price": _ScalarSpec("price_usd", sql.SQL("<=")),
+    "min_price": _ScalarSpec("price_gbp", sql.SQL(">=")),
+    "max_price": _ScalarSpec("price_gbp", sql.SQL("<=")),
     "min_accommodates": _ScalarSpec("accommodates", sql.SQL(">=")),
     "min_bedrooms": _ScalarSpec("bedrooms", sql.SQL(">=")),
     "min_beds": _ScalarSpec("beds", sql.SQL(">=")),

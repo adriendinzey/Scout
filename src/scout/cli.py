@@ -6,6 +6,7 @@ answers "is my environment actually working?" without needing either.
 
 from __future__ import annotations
 
+import logging
 import sys
 from typing import Annotated
 
@@ -13,6 +14,7 @@ import typer
 
 from scout import __version__
 from scout.config import Settings, get_settings
+from scout.data.load import LoadError, load_data
 from scout.data.migrate import MigrationError, run_migrations
 
 app = typer.Typer(
@@ -157,9 +159,42 @@ def runs(
 
 
 @data_app.command("load")
-def data_load() -> None:
+def data_load(
+    quiet: Annotated[
+        bool, typer.Option("--quiet", help="Print the summary only, without per-stage progress.")
+    ] = False,
+) -> None:
     """Load the Inside Airbnb CSVs into PostgreSQL, dropping personal fields."""
-    raise NotImplementedYetError("scout data load", "M1")
+    settings = get_settings()
+    # Progress goes to stderr, so the summary on stdout stays pipeable.
+    logging.basicConfig(
+        level=logging.WARNING if quiet else logging.INFO,
+        format="%(message)s",
+        stream=sys.stderr,
+    )
+    try:
+        report = load_data(settings)
+    except LoadError as exc:
+        typer.secho(f"load failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    print(f"loaded the {report.snapshot_date} {report.city} snapshot in {report.elapsed_s:.0f}s")
+    print(f"  listings       : {report.listings_loaded:,} of {report.listings_seen:,} rows")
+    if report.listings_rejected:
+        reasons = ", ".join(f"{column}: {count}" for column, count in report.listing_rejections)
+        print(f"  rejected       : {report.listings_rejected:,} ({reasons})")
+    if report.listings_duplicated:
+        print(f"  duplicates     : {report.listings_duplicated:,} repeated ids, first kept")
+    if report.listings_removed:
+        print(f"  removed        : {report.listings_removed:,} no longer in the snapshot")
+    print(f"  reviews        : {report.reviews_kept:,} kept of {report.reviews_seen:,} rows")
+    if report.reviews_without_listing:
+        print(f"  orphan reviews : {report.reviews_without_listing:,} for an unknown listing")
+    print(
+        f"  lookups        : {report.neighbourhoods} neighbourhoods, "
+        f"{report.room_types} room types, {report.property_types} property types "
+        f"({report.property_types_collapsed} collapsed), {report.amenities:,} amenities"
+    )
 
 
 @data_app.command("embed")
