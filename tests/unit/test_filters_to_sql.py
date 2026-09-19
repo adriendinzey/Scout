@@ -174,8 +174,8 @@ def test_false_is_a_real_filter_not_an_absent_one(field: str) -> None:
 # -------------------------------------------------------- scalar mappings --
 
 SCALAR_CASES = [
-    ("min_price", 123.5, '"price_usd" >= %s'),
-    ("max_price", 123.5, '"price_usd" <= %s'),
+    ("min_price", 123.5, '"price_gbp" >= %s'),
+    ("max_price", 123.5, '"price_gbp" <= %s'),
     ("min_accommodates", 4, '"accommodates" >= %s'),
     ("min_bedrooms", 2, '"bedrooms" >= %s'),
     ("min_beds", 3, '"beds" >= %s'),
@@ -218,13 +218,13 @@ def test_every_declared_filter_field_is_mapped_to_sql() -> None:
 def test_scalar_conditions_combine_with_and_in_a_stable_order() -> None:
     filters = Filters(max_price=200, min_accommodates=2, min_rating=4.5)
     first = where_of(only(plan_for(filters)))
-    assert first == '"price_usd" <= %s AND "accommodates" >= %s AND "rating" >= %s'
+    assert first == '"price_gbp" <= %s AND "accommodates" >= %s AND "rating" >= %s'
     assert where_of(only(plan_for(filters))) == first
 
 
 def test_both_price_bounds_become_two_conditions_on_one_column() -> None:
     query = only(plan_for(Filters(min_price=50, max_price=200)))
-    assert where_of(query) == '"price_usd" >= %s AND "price_usd" <= %s'
+    assert where_of(query) == '"price_gbp" >= %s AND "price_gbp" <= %s'
     assert query.params == (EMBEDDING, 50.0, 200.0, EMBEDDING, 10)
 
 
@@ -390,7 +390,7 @@ def test_shared_conditions_appear_in_every_branch() -> None:
     assert len(plan.queries) == 2
     for query in plan.queries:
         clause = where_of(query)
-        assert clause == '"neighbourhood_id" = %s AND "price_usd" <= %s AND "has_wifi" = %s'
+        assert clause == '"neighbourhood_id" = %s AND "price_gbp" <= %s AND "has_wifi" = %s'
         assert query.params[2:4] == (200.0, True)
 
 
@@ -401,7 +401,7 @@ def test_shared_conditions_appear_in_every_branch() -> None:
     ("kwargs", "expected"),
     [
         ({"min_rating": 4.5}, ("rating",)),
-        ({"max_price": 200}, ("price_usd",)),
+        ({"max_price": 200}, ("price_gbp",)),
         ({"min_bedrooms": 2}, ("bedrooms",)),
         ({"min_beds": 2}, ("beds",)),
         ({"min_bathrooms": 1.0}, ("bathrooms",)),
@@ -410,7 +410,9 @@ def test_shared_conditions_appear_in_every_branch() -> None:
         ({"host_is_superhost": False}, ("host_is_superhost",)),
         ({"min_accommodates": 2}, ()),
         ({"min_reviews": 5}, ()),
-        ({"instant_bookable": True}, ()),
+        # Nullable since the snapshot stopped publishing it, and NULL for every
+        # row of the London release: this filter currently excludes everything.
+        ({"instant_bookable": True}, ("instant_bookable",)),
         ({"max_minimum_nights": 3}, ()),
         ({"neighbourhood_ids": (1,)}, ()),
     ],
@@ -427,7 +429,7 @@ def test_null_excluding_filters_are_identifiable(
 
 def test_null_excluding_columns_are_collected_across_filters() -> None:
     plan = plan_for(Filters(min_rating=4.5, max_price=200, min_accommodates=2))
-    assert plan.null_excluding_columns == ("price_usd", "rating")
+    assert plan.null_excluding_columns == ("price_gbp", "rating")
 
 
 # ------------------------------------------------------------- the shape ---
@@ -454,7 +456,7 @@ def test_the_selected_columns_can_be_overridden() -> None:
 
 def test_the_default_columns_carry_what_ranking_and_display_need() -> None:
     text = rendered(only(plan_for(Filters())))
-    for column in ("id", "name", "price_usd", "rating", "number_of_reviews"):
+    for column in ("id", "name", "price_gbp", "rating", "number_of_reviews"):
         assert f'"{column}"' in text
     # Large text is fetched per cited listing instead of on every candidate.
     for column in ("description", "doc_text"):

@@ -9,7 +9,7 @@ Two properties are deliberate.
 
 **`None` means unconstrained.** It is never shorthand for a permissive default:
 an absent price ceiling emits no price condition at all rather than
-``price_usd <= inf``, so "the user said nothing about price" stays
+``price_gbp <= inf``, so "the user said nothing about price" stays
 distinguishable from "the user will pay anything".
 
 **A filter set is frozen and canonically ordered.** Set-valued fields are sorted
