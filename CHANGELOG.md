@@ -64,6 +64,27 @@ Notable changes to Scout. Format loosely follows
   carry their token counts, so a run's cost is not understated by exactly the
   calls that went wrong. Token and dollar totals accumulate per run, broken down
   by node and by model.
+- `scout data load`, which streams the two Inside Airbnb CSVs into PostgreSQL.
+  Host and reviewer identity is dropped while parsing, by typed rows that have
+  no field to put it in, so nothing downstream has to remember to remove it.
+  Reviews are capped at the most recent few per listing, chosen with a window
+  function over the staged rows rather than tracked per listing in memory: peak
+  memory over the 2.2 million row review file is under 60 MB. A reload replaces
+  rather than duplicates and keeps the generated listing ids stable, because
+  reviews and later relevance labels reference them, and it drops `doc_text`
+  and the embedding of any listing whose document inputs changed rather than
+  leaving an embedding of text that no longer exists. A row that cannot be
+  stored — a missing `minimum_nights`, a value no column can hold — is counted
+  and reported by column rather than taking the load down with it, and a file
+  that yields no usable listing at all is an error rather than an empty
+  database. The snapshot's release date is required and recorded beside the
+  data, since listing ids are not stable between releases.
+- Two schema corrections the London file forced, in migration `0002`:
+  `price_usd` became `price_gbp`, because prices are quoted in pounds despite
+  the dollar sign the source prints, and `instant_bookable` became nullable,
+  because the scrape has stopped publishing it and NULL is what "the snapshot
+  does not say" means. Storing `false` would have invented an answer for all
+  92,638 listings.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
 
