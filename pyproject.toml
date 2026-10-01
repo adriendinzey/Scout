@@ -23,7 +23,7 @@ dependencies = [
 embed = ["sentence-transformers>=3.3"]
 # Mirroring traces to LangSmith is optional by design: Scout's own tracing is
 # complete without it, and no test may depend on it.
-trace = ["langsmith>=0.1"]
+trace = ["langsmith>=0.14.1"]
 
 [project.scripts]
 scout = "scout.cli:app"
