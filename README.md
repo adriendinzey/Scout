@@ -18,7 +18,7 @@ Scout turns that into structured filters plus a semantic query, then hands them 
 
 ## What works today
 
-State at commit `e9ab31f` (2026-09-18). Anything not ticked here is design, not a claim.
+State of `main` on 2026-10-01. Anything not ticked here is design, not a claim.
 
 | | | Asserted by |
 |---|---|---|
