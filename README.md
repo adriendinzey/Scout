@@ -36,7 +36,7 @@ State at commit `e9ab31f` (2026-09-18). Anything not ticked here is design, not 
 | Ranking, review citations, the Answer node | ⬜ M4 | — |
 | The evaluation harness and every number in [Evaluation](#evaluation) | ⬜ M5 | — |
 
-**480 tests pass at this commit** — 430 unit, 50 integration against the Compose database — with `ruff` and `mypy --strict` clean. The commands that are not implemented exit non-zero naming the milestone they land in, rather than printing nothing and returning 0.
+**482 tests pass at this commit** — 432 unit, 50 integration against the Compose database — with `ruff` and `mypy --strict` clean. The commands that are not implemented exit non-zero naming the milestone they land in, rather than printing nothing and returning 0.
 
 ## Why this exists
 
@@ -111,11 +111,10 @@ docker compose up -d --wait
 
 # 2. Python environment. `--all-extras` adds torch for the embedder, which is M1.
 uv sync
-cp .env.example .env
-
-#    Then edit .env. It ships SCOUT_LLM_BACKEND=anthropic with a key placeholder,
-#    which overrides the code's `fake` default, so set it to `fake` unless you
-#    mean to spend money. Nothing calls Claude yet either way.
+cp .env.example .env      # ships SCOUT_LLM_BACKEND=fake and an empty key, so a
+                          # fresh copy cannot spend money. Setting a key and
+                          # switching to `anthropic` is a deliberate act — and
+                          # nothing calls Claude yet in any case.
 
 # 3. Confirm the stack is actually working
 uv run scout doctor

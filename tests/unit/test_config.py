@@ -35,6 +35,25 @@ def test_missing_api_key_explains_itself() -> None:
         settings.require_anthropic_key()
 
 
+def test_a_blank_api_key_counts_as_missing() -> None:
+    """`ANTHROPIC_API_KEY=` in a .env is unset, not a key.
+
+    An empty string satisfies `is None` checks while being unusable, so the
+    failure would land as an authentication error on the first billed call
+    instead of at startup where it can be explained.
+    """
+    for blank in ("", "   ", "\t\n"):
+        settings = Settings(_env_file=None, llm_backend="anthropic", anthropic_api_key=blank)
+        assert settings.anthropic_api_key is None
+        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY is not set"):
+            settings.require_anthropic_key()
+
+
+def test_a_real_api_key_is_kept_verbatim() -> None:
+    settings = Settings(_env_file=None, llm_backend="anthropic", anthropic_api_key="sk-ant-xyz")
+    assert settings.require_anthropic_key().get_secret_value() == "sk-ant-xyz"
+
+
 def test_ef_search_is_bounded_by_what_brindle_accepts() -> None:
     """brindle.ef_search has a hard range of 1..10000 in the extension."""
     with pytest.raises(ValidationError):

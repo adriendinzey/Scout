@@ -83,10 +83,22 @@ Notable changes to Scout. Format loosely follows
   `price_usd` became `price_gbp`, because prices are quoted in pounds despite
   the dollar sign the source prints, and `instant_bookable` became nullable,
   because the scrape has stopped publishing it and NULL is what "the snapshot
-  does not say" means. Storing `false` would have invented an answer for all
-  92,638 listings.
+  does not say" means. Storing `false` would have invented an answer for
+  every one of the 92,638 listing rows the file ships.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
+
+### Fixed
+
+- An empty `ANTHROPIC_API_KEY` now counts as no key at all. `ANTHROPIC_API_KEY=`
+  in a `.env` parsed as an empty string rather than as unset, which satisfied
+  every `is None` check: `scout doctor` reported "environment looks good" while
+  pointed at the real API with an unusable key, and the failure would have
+  surfaced as an authentication error on the first billed call instead of at
+  startup. `.env.example` also shipped `SCOUT_LLM_BACKEND=anthropic` with a key
+  placeholder, so copying it opted a fresh checkout into spending money; it now
+  ships the fake backend and an empty key, matching the rule that switching is a
+  deliberate act.
 
 ### Notes
 
