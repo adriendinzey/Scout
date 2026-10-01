@@ -5,19 +5,27 @@ works at the current commit, not what is planned.
 
 **Legend:** ✅ done · 🚧 in progress · ⬜ not started
 
-## M0 — Project skeleton ⬜
+## M0 — Project skeleton ✅
 Repo layout, `uv` project, ruff/mypy/pytest, CI, and a Docker Compose Postgres 17
 image carrying Brindle (pinned) and pgvector.
-*Exit: `docker compose up` works, both extensions load, CI green.*
+*Exit: `docker compose up` works, both extensions load, CI green.* **Met** — both
+extensions load in one database, and the pushdown contract tests assert `Index
+Cond` rather than a post-scan `Filter` for every supported predicate shape.
 
-## M1 — Data loaded and indexed ⬜
+## M1 — Data loaded and indexed 🚧
 Load, embed, and index the London Inside Airbnb snapshot. Privacy rules enforced
-and tested.
+and tested. **In:** the schema, the migration runner (`scout data migrate`), and
+`scout data load`, which drops host and reviewer identity while parsing rather
+than nulling it afterwards. **Not in:** the amenity columns, the document
+template, the embedder, and the index build.
 *Exit: every listing embedded, Brindle index builds, `EXPLAIN` shows `Index Cond`,
 cold/warm latency and backend memory measured.*
 
-## M2 — Parse and Retrieve ⬜ *(priority)*
+## M2 — Parse and Retrieve 🚧 *(priority)*
 Natural language → validated filters → filtered vector search, with a trace.
+**In:** the LLM boundary (backend protocol, Anthropic client with the cacheable
+prefix, deterministic fake, usage and cost) and the filter→SQL mapping.
+**Not in:** the Parse node, the Retrieve node, and `scout ask`.
 *Exit: `scout ask` returns filtered results from Brindle for a real query.*
 
 ## M3 — Agent tool loop ⬜ *(priority)*

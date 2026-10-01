@@ -96,6 +96,21 @@ class Settings(BaseSettings):
     snapshot_date: str | None = None
     max_reviews_per_listing: int = Field(default=5, ge=0)
 
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _blank_key_is_no_key(cls, key: object) -> object:
+        """Treat an empty or whitespace key as absent.
+
+        `ANTHROPIC_API_KEY=` in a .env file parses as an empty string, not as
+        unset, which would satisfy every `is None` check and then fail at the
+        first API call as an authentication error -- the opposite of a loud
+        failure at startup. Normalizing here means one definition of "there is
+        no key" for `scout doctor` and `require_anthropic_key` alike.
+        """
+        if isinstance(key, str) and not key.strip():
+            return None
+        return key
+
     @field_validator("candidate_pool")
     @classmethod
     def _pool_must_fit_ef_search(cls, pool: int, info: object) -> int:
