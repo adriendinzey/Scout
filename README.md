@@ -8,9 +8,9 @@
 
 You type what you actually want:
 
-> *"quiet place near the water for two, under $200 a night, good for working remotely, well reviewed"*
+> *"quiet place near the water for two, under £200 a night, good for working remotely, well reviewed"*
 
-Scout turns that into structured filters plus a semantic query, then hands them to an agent with five tools over a filter-aware vector index. The agent decides what to do: count how many listings match before spending a search, look up the median price in the neighbourhood before moving a price ceiling, search, read a listing, pull its reviews. It works inside limits the code enforces — a tool-call budget, a search budget, a cost ceiling, and a floor on group size it is not allowed to cross. Then it writes a short answer citing the listings and guest reviews it actually used, and says plainly what it could not satisfy.
+Scout turns that into structured filters plus a semantic query, then hands them to an agent with five tools over a filter-aware vector index. The agent decides what to do: count how many listings match before spending a search, look up the median price in the neighbourhood before moving a price ceiling, search, read a listing, pull its reviews. It is designed to work inside limits the code enforces rather than requests — a tool-call budget, a search budget, a cost ceiling, and a floor on group size it is not allowed to cross. Then it writes a short answer citing the listings and guest reviews it actually used, and says plainly what it could not satisfy.
 
 > **Status: the data is loading; the demo does not run yet.** `scout ask` is not implemented — the embedder, the index build, the Parse node, the Retrieve node and the agent loop are the next milestones. What is actually built is listed in [What works today](#what-works-today); nothing else below is claimed as working, and the numbers in [Evaluation](#evaluation) stay empty until they come from a real run. Milestones: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -22,17 +22,17 @@ State at commit `e9ab31f` (2026-09-18). Anything not ticked here is design, not 
 
 | | | Asserted by |
 |---|---|---|
-| Postgres 17 in one image with **Brindle** (pinned `025b1315`) and **pgvector 0.8.0** | ✅ | `docker compose up -d --wait`, `uv run scout doctor` |
+| Postgres 17 in one image with **Brindle** (pinned `025b1315`) and **pgvector 0.8.0**, and `scout doctor` to confirm it | ✅ | `docker compose up -d --wait`, `uv run scout doctor` — a recorded run, not a test; nothing in `tests/` drives the CLI |
 | **The premise, asserted:** `EXPLAIN` shows `Index Cond`, not a post-scan `Filter`, for every supported predicate shape; `ef_search` bounds a ranked scan; NULL satisfies no comparison | ✅ | `tests/integration/test_brindle_pushdown.py` |
 | Schema, lookup tables, and the migration runner — `scout data migrate` (migrations `0001`–`0002`) | ✅ | `tests/integration/test_schema.py`, `tests/unit/test_migrate.py` |
-| **`scout data load`** — streams both CSVs into PostgreSQL, drops host and reviewer identity while parsing into rows that have no field to hold it, caps reviews per listing, replaces rather than duplicates on reload, and refuses to run without the snapshot's release date | ✅ | `tests/unit/test_load.py`, `tests/unit/test_parsers.py`, `tests/integration/test_load.py` |
-| Typed settings, `scout doctor`, and cost accounting with cache and Batch rates | ✅ | `tests/unit/test_config.py`, `tests/unit/test_pricing.py` |
+| **`scout data load`** — streams both CSVs into PostgreSQL, drops host and reviewer identity while parsing into rows that have no field to hold it, caps reviews per listing, replaces rather than duplicates on reload, and refuses to run without the snapshot's release date | ✅ — the London `2026-06-19` snapshot loads to **92,633 listings and 291,004 reviews**, with `doc_text` and `embedding` still NULL on every row | `tests/unit/test_load.py`, `tests/unit/test_parsers.py`, `tests/integration/test_load.py` |
+| Typed settings — including the validators that refuse a candidate pool larger than `ef_search` — and cost accounting with cache and Batch rates | ✅ | `tests/unit/test_config.py`, `tests/unit/test_pricing.py` |
 | `Filters` model and the **filter→SQL mapping**: parameterized filtered-vector queries, disjunction fan-out, the cap, reported post-filters and NULL exclusions | ✅ pure logic, no caller yet | `tests/unit/test_filters_to_sql.py` |
-| **LLM boundary:** backend protocol, the Anthropic client with its cacheable prefix, a deterministic fake that scripts a whole tool-use conversation, per-run tokens and dollars | ✅ | `tests/unit/test_backend.py`, `test_fake_backend.py`, `test_anthropic_backend.py`, `test_usage.py` |
+| **LLM boundary:** backend protocol, the Anthropic client with its cacheable prefix, a deterministic fake that scripts a whole tool-use conversation, tokens and dollars accumulated per run in memory | ✅ | `tests/unit/test_backend.py`, `test_fake_backend.py`, `test_anthropic_backend.py`, `test_usage.py` |
 | Amenity columns, the document template, `scout data embed`, `scout data index` | ⬜ M1 | — |
 | Parse node, Retrieve node, `scout ask` | ⬜ M2 | — |
 | The agent tool loop, the five tools, the enforced budgets, `--mode fixed` | ⬜ M3 | — |
-| Run store, `scout trace`, `scout runs`, per-run cost | ⬜ M3.5 | — |
+| Run store, `scout trace`, `scout runs`, cost persisted per run and printed | ⬜ M3.5 | — |
 | Ranking, review citations, the Answer node | ⬜ M4 | — |
 | The evaluation harness and every number in [Evaluation](#evaluation) | ⬜ M5 | — |
 
@@ -85,7 +85,7 @@ Each limit lands as a pure function with a test that fails if the limit is remov
 
 ## What it costs to run
 
-Scout calls Claude for Parse (once), for each turn of the agent loop (capped), and for the Answer. **You supply your own `ANTHROPIC_API_KEY`** — it is read from the environment and never committed, so running Scout costs the person running it, not the author.
+Scout will call Claude for Parse (once), for each turn of the agent loop (capped), and for the Answer — no node calls it yet; only the boundary in `src/scout/llm/` can. **You supply your own `ANTHROPIC_API_KEY`** — it is read from the environment and never committed, so running Scout costs the person running it, not the author.
 
 Every run will print what it cost, and four things keep that number small — two of them already in:
 
@@ -109,10 +109,13 @@ What runs today:
 #    The first build compiles Brindle from source and takes a few minutes.
 docker compose up -d --wait
 
-# 2. Python environment
-uv sync --all-extras
-cp .env.example .env      # SCOUT_LLM_BACKEND defaults to fake; a key is only
-                          # needed for real Claude calls, which nothing makes yet
+# 2. Python environment. `--all-extras` adds torch for the embedder, which is M1.
+uv sync
+cp .env.example .env
+
+#    Then edit .env. It ships SCOUT_LLM_BACKEND=anthropic with a key placeholder,
+#    which overrides the code's `fake` default, so set it to `fake` unless you
+#    mean to spend money. Nothing calls Claude yet either way.
 
 # 3. Confirm the stack is actually working
 uv run scout doctor
@@ -134,14 +137,11 @@ The rest is specified and not implemented. These commands exist and exit non-zer
 uv run scout data embed    # M1
 uv run scout data index    # M1
 
-# M2 — the first thing worth showing anyone
-uv run scout ask "quiet place near the water for two, under \$200, good for working remotely"
-
-# M3.5 — the step table: what it called, how long each step took, what it cost
-uv run scout ask "3-bed in Hackney under \$60 a night, 5-star" --trace
-
-# M3 — the hardcoded baseline instead of the agent
-uv run scout ask "..." --mode fixed
+# `ask` itself lands in M2, and says so whichever flags you pass; the flags
+# below only start doing anything in the milestone noted beside each.
+uv run scout ask "quiet place near the water for two, under £200, good for working remotely"
+uv run scout ask "3-bed in Hackney under £60 a night, 5-star" --trace   # step table: M3.5
+uv run scout ask "..." --mode fixed                                     # the baseline: M3
 
 # M3.5 — earlier runs, stored and replayable
 uv run scout runs --last 20
@@ -172,14 +172,14 @@ Method: [docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Limitations
 
-Stated up front rather than discovered by a reader:
+Properties of the design, stated up front rather than discovered by a reader. The ones about what Scout *tells you* depend on the Answer node (M4):
 
 - **One city, one snapshot.** Results do not generalize to other markets, and listing IDs are not stable across Inside Airbnb snapshots.
 - **Reviews are not searchable.** They are stored for citation and a capped excerpt feeds the listing's embedding, but the unit of search is the listing. A query about something only a reviewer mentioned may miss.
 - **`OR` is not pushed down.** Brindle pushes equality and ranges combined with `AND`. Disjunctions run one retrieval per branch and merge, capped at 4 branches, after which Scout post-filters and records that it did.
 - **Coordinates are approximate.** Inside Airbnb offsets listing locations for privacy, so "near the water" is a semantic hint and a bounding box, not a real distance.
-- **Nulls exclude.** A listing with no rating does not satisfy `rating >= 4.5`. Filtering on quality silently drops new listings, and Scout says so when it does.
-- **No availability or pricing intelligence.** Scout cannot answer "is it free in June" — dates are not in scope, and such asks are reported as unsupported rather than quietly ignored.
+- **Nulls exclude.** A listing with no rating does not satisfy `rating >= 4.5`. Filtering on quality silently drops new listings; the query plan already reports which filters exclude NULLs, and the answer is to say so out loud.
+- **No availability or pricing intelligence.** Scout cannot answer "is it free in June" — dates are not in scope, and such asks are to be reported as unsupported rather than quietly ignored.
 
 ## Development
 
