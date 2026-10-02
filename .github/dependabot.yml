@@ -15,11 +15,32 @@ updates:
           - "ruff"
           - "mypy"
           - "pytest*"
+      # Everything else in this ecosystem arrives as one PR. Each of these bumps
+      # rewrites uv.lock, and main requires a branch to be up to date before it
+      # merges, so ungrouped updates cost one rebase and one full CI run each,
+      # including an image rebuild in the integration job. The exclusions are the
+      # dependencies the groups above already claim, listed again here so the
+      # grouping does not depend on the order these entries are evaluated in.
+      python-runtime:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "langgraph*"
+          - "langchain*"
+          - "ruff"
+          - "mypy"
+          - "pytest*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # One PR for every action bump, for the same reason as the uv group above:
+      # each one otherwise costs its own rebase and its own full CI run.
+      actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: "docker"
     directory: "/docker"
