@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Agentic search over short-term rental listings. Scout parses a natural-language query into structured filters, and then lets Claude drive the search itself by counting matches, checking what a field contains, and searching again with different filters when the first attempt comes back thin.
+Agentic search over short-term rental listings, built as a LangGraph workflow. Scout parses a natural-language query into structured filters, and then lets Claude drive the search itself by counting matches, checking what a field contains, and searching again with different filters when the first attempt comes back thin.
 
 A query looks like this:
 
@@ -30,7 +30,7 @@ This is the state of `main` on 2026-10-01. Anything that is not ticked here is a
 | The `Filters` model and the filter-to-SQL mapping. It composes parameterized filtered-vector queries, fans out disjunctions up to a cap, and reports both the post-filters it fell back to and the filters that exclude NULLs | ✅ This is pure logic that nothing calls yet | `tests/unit/test_filters_to_sql.py` |
 | The LLM boundary. It holds the backend protocol, the Anthropic client with its cacheable prefix, a deterministic fake that can script a whole tool-use conversation, and per-run token and dollar totals held in memory | ✅ | `tests/unit/test_backend.py`, `test_fake_backend.py`, `test_anthropic_backend.py`, `test_usage.py` |
 | The amenity columns, the document template, `scout data embed`, and `scout data index` | ⬜ M1 | Nothing yet |
-| The Parse node, the Retrieve node, and `scout ask` | ⬜ M2 | Nothing yet |
+| The LangGraph wiring, the Parse node, the Retrieve node, and `scout ask` | ⬜ M2 | Nothing yet |
 | The agent tool loop, the five tools, the enforced budgets, and `--mode fixed` | ⬜ M3 | Nothing yet |
 | The run store, `scout trace`, `scout runs`, and the per-run cost that gets persisted and printed | ⬜ M3.5 | Nothing yet |
 | Ranking, review citations, and the Answer node | ⬜ M4 | Nothing yet |
@@ -61,6 +61,8 @@ flowchart LR
 ```
 
 Parse stays deterministic by design. It makes one grounded, schema-validated call, so that the agent starts from validated filters and the expensive grounding block stays cacheable.
+
+The graph is a LangGraph `StateGraph` with named nodes and visible edges, and the tool loop inside the agent node is written out by hand. There is no `create_react_agent` and no other prebuilt agent helper anywhere in the project. The control flow and the budgets are the part of this worth showing, and a prebuilt agent would hide both.
 
 The model decides which tool to call, with which arguments, when to search again with different filters, when it has enough, and how to explain what it changed.
 
