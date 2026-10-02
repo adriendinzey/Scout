@@ -8,9 +8,9 @@ license = { file = "LICENSE" }
 authors = [{ name = "Adrien Dinzey" }]
 
 dependencies = [
-    "langgraph>=1.0,<2.0",
-    "anthropic>=1.6",
-    "psycopg[binary,pool]>=3.3.5",
+    "langgraph>=1.2.12,<2.0",
+    "anthropic>=1.8.0",
+    "psycopg[binary,pool]>=3.3.6",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "typer>=0.15",
@@ -20,10 +20,10 @@ dependencies = [
 [project.optional-dependencies]
 # sentence-transformers drags in torch (~2 GB). Kept out of the default install
 # so CI, lint, and unit tests stay fast; only the embed pipeline needs it.
-embed = ["sentence-transformers>=3.3"]
+embed = ["sentence-transformers>=6.1.0"]
 # Mirroring traces to LangSmith is optional by design: Scout's own tracing is
 # complete without it, and no test may depend on it.
-trace = ["langsmith>=0.1"]
+trace = ["langsmith>=0.14.1"]
 
 [project.scripts]
 scout = "scout.cli:app"
