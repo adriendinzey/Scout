@@ -9,7 +9,7 @@ authors = [{ name = "Adrien Dinzey" }]
 
 dependencies = [
     "langgraph>=1.2.12,<2.0",
-    "anthropic>=1.8.0",
+    "anthropic>=1.11.0",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
@@ -23,7 +23,7 @@ dependencies = [
 embed = ["sentence-transformers>=6.1.0"]
 # Mirroring traces to LangSmith is optional by design: Scout's own tracing is
 # complete without it, and no test may depend on it.
-trace = ["langsmith>=0.14.1"]
+trace = ["langsmith>=0.14.4"]
 
 [project.scripts]
 scout = "scout.cli:app"
