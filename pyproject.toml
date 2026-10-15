@@ -8,7 +8,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Adrien Dinzey" }]
 
 dependencies = [
-    "langgraph>=1.2.12,<2.0",
+    "langgraph>=1.2.14,<2.0",
     "anthropic>=1.8.0",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic>=2.9",
