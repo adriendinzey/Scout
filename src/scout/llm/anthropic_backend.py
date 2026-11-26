@@ -189,10 +189,16 @@ def to_output_config(response_schema: Mapping[str, Any] | None) -> OutputConfigP
 
 def to_message_params(messages: Sequence[Message]) -> list[MessageParam]:
     """Scout's messages in wire shape, tool blocks included."""
-    return [
-        {"role": message.role, "content": [_to_block_param(b) for b in message.content]}
-        for message in messages
-    ]
+    return [_to_message_param(message) for message in messages]
+
+
+def _to_message_param(message: Message) -> MessageParam:
+    # The SDK types each role's message separately, and a dict whose role is a
+    # variable matches none of them, so each role is spelled out.
+    content = [_to_block_param(b) for b in message.content]
+    if message.role == "user":
+        return {"role": "user", "content": content}
+    return {"role": "assistant", "content": content}
 
 
 def _to_block_param(block: ContentBlock) -> ContentBlockParam:
