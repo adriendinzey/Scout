@@ -36,11 +36,19 @@ from scout.llm.backend import (
     LlmApiError,
     LlmRefusalError,
     LlmRequest,
+    LlmResponse,
     LlmResponseError,
     Message,
     TextBlock,
 )
-from scout.llm.fake_backend import FakeBackend, FakeTurn, error_turn, json_turn, refusal_turn
+from scout.llm.fake_backend import (
+    DEFAULT_FAKE_USAGE,
+    FakeBackend,
+    FakeTurn,
+    error_turn,
+    json_turn,
+    refusal_turn,
+)
 from scout.llm.usage import UsageAccumulator
 from scout.retrieval.filters import Filters
 from scout.retrieval.query import where_clause
@@ -349,6 +357,12 @@ class TestTheResponseSchema:
         """Nor must renaming a class or a field's title."""
         assert '"title"' not in json.dumps(response_schema(GROUNDING))
 
+    def test_sends_no_python_defaults_to_the_model(self) -> None:
+        """The SDK folds a leftover `default` into the description as `{default: None}`."""
+        transformed = json.dumps(transform_schema(response_schema(GROUNDING)))
+
+        assert "default" not in transformed
+
     def test_survives_the_sdk_transform_the_real_backend_applies(self) -> None:
         transformed = transform_schema(response_schema(GROUNDING))
 
@@ -431,6 +445,25 @@ class TestAHallucinatedName:
         flagged = {"constraint": "somewhere in atlantis", "reason": "not a London area"}
         result, _, _ = run(
             json_turn(body(neighbourhoods=["Atlantis"], unsupported_constraints=[flagged]))
+        )
+
+        assert result.unsupported_constraints == (UnsupportedConstraint(**flagged),)
+
+    def test_a_name_inside_another_word_does_not_count_as_reported(self) -> None:
+        """'ac' is inside 'space'; treating that as covered would drop the ask entirely."""
+        flagged = {"constraint": "a parking space for my car", "reason": "no parking filter"}
+        result, _, _ = run(json_turn(body(amenities=["AC"], unsupported_constraints=[flagged])))
+
+        assert [item.constraint for item in result.unsupported_constraints] == [
+            "a parking space for my car",
+            "AC",
+        ]
+
+    def test_a_name_ending_in_punctuation_is_still_recognised(self) -> None:
+        """Both a word-boundary match and an unescaped pattern would miss this one."""
+        flagged = {"constraint": "a TV (cable) in the bedroom", "reason": "no TV filter"}
+        result, _, _ = run(
+            json_turn(body(amenities=["TV (cable)"], unsupported_constraints=[flagged]))
         )
 
         assert result.unsupported_constraints == (UnsupportedConstraint(**flagged),)
@@ -563,7 +596,36 @@ class TestInvalidTwice:
 # --- Failures that are not the model's mistake ------------------------------
 
 
+class ForgetsToDecode:
+    """A backend that breaks its contract: a schema went out, no decoded body came back."""
+
+    def __init__(self) -> None:
+        self.calls: list[LlmRequest] = []
+
+    def complete(self, request: LlmRequest) -> LlmResponse:
+        self.calls.append(request)
+        return LlmResponse(
+            model=request.model,
+            content=(TextBlock(json.dumps(body())),),
+            stop_reason="end_turn",
+            usage=DEFAULT_FAKE_USAGE,
+            json_output=None,
+        )
+
+
 class TestFailuresThatAreNotRetried:
+    def test_a_backend_that_returns_no_structured_output_is_not_blamed_on_the_model(
+        self,
+    ) -> None:
+        """Feeding a backend bug back as the model's mistake would waste the retry."""
+        backend = ForgetsToDecode()
+        usage = UsageAccumulator()
+
+        with pytest.raises(LlmResponseError, match="no structured output"):
+            parse_query(QUERY, backend=backend, grounding=GROUNDING, settings=SETTINGS, usage=usage)
+        assert len(backend.calls) == 1
+        assert usage.call_count == 1
+
     def test_a_refusal_is_passed_on_and_priced(self) -> None:
         backend = FakeBackend([refusal_turn(), json_turn(body())])
         usage = UsageAccumulator()

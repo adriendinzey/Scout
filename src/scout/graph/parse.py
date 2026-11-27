@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import re
 from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
@@ -463,9 +464,11 @@ def ground(body: Mapping[str, Any], grounding: Grounding) -> ParseResult:
     )
     if ungrounded:
         logger.warning(
-            "parse named %d value(s) outside the vocabulary, moved to unsupported: %s",
+            "parse named %d value(s) outside the vocabulary, kept out of the filters (%s); "
+            "%d added to unsupported, the rest already reported by the model",
             len(ungrounded),
             ", ".join(f"{item.field}={item.value!r}" for item in ungrounded),
+            len(moved),
         )
     return ParseResult(
         filters=filters,
@@ -478,12 +481,16 @@ def ground(body: Mapping[str, Any], grounding: Grounding) -> ParseResult:
 def _already_reported(name: str, reported: Iterable[UnsupportedConstraint]) -> bool:
     """Whether the model already listed this name among its own unsupported asks.
 
-    A containment test rather than equality, because the model records the
-    user's own words: "in Atlantis" covers the rejected name "Atlantis", and
-    listing both would have the answer report one ask twice.
+    The name has to appear as a whole word, not merely as an equal string,
+    because the model records the user's own words: "in Atlantis" covers the
+    rejected name "Atlantis", and listing both would report one ask twice. Not
+    as a bare substring either -- "AC" is inside "a parking space", and treating
+    that as covered would drop the user's ask from the answer altogether.
+    Lookarounds rather than ``\\b``, which never matches beside a name that
+    begins or ends with punctuation, as "TV (cable)" does.
     """
-    needle = name.casefold()
-    return any(needle in item.constraint.casefold() for item in reported)
+    whole_word = re.compile(rf"(?<!\w){re.escape(name)}(?!\w)", re.IGNORECASE)
+    return any(whole_word.search(item.constraint) for item in reported)
 
 
 # --- The node --------------------------------------------------------------
