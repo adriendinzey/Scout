@@ -121,7 +121,11 @@ variants, repeated whenever something changes. Three things keep that affordable
 
 1. **Batch API** — the eval is asynchronous by nature, so it runs at **half price**.
 2. **Prompt caching** — the Parse grounding block is byte-identical across every
-   query in a run.
+   query in a run. That pays only where a prefix clears the model's minimum
+   cacheable length, 4,096 tokens on `claude-haiku-4-5`. Parse's prefix is an
+   estimated 1.3K tokens, so the saving is expected from the agent loop's longer
+   prefix rather than from Parse. Every priced call records its node and its
+   cache-read tokens, so the first real run settles it.
 3. **A recorded run set** — reported figures come from a saved run, so writing up
    results does not mean paying to re-run.
 
