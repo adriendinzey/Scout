@@ -85,6 +85,20 @@ Notable changes to Scout. Format loosely follows
   because the scrape has stopped publishing it and NULL is what "the snapshot
   does not say" means. Storing `false` would have invented an answer for
   every one of the 92,638 listing rows the file ships.
+- The Parse node, which makes one schema-constrained call to turn a request into
+  a validated `Filters`, a semantic query, and the list of things the user asked
+  for that no filter can express. The model works in names, never lookup ids:
+  the response schema enumerates the neighbourhoods, room types, property types
+  and indexed amenities the database actually holds, read once per process from
+  the lookup tables, and a name outside that vocabulary is kept out of the
+  filters and reported rather than passed to SQL. An invalid answer is retried
+  once with the problem fed back and then raises. It never falls back to empty
+  filters, which would search the whole corpus and present the result as an
+  answer. Parse emits no area filter, because coordinates recalled for a
+  landmark would be a guess. The system prompt and the response schema are
+  byte-stable across queries, though at an estimated 1.3K tokens the prefix is
+  under the 4,096-token minimum `claude-haiku-4-5` needs before it caches.
+  Nothing calls the node until `scout ask` lands.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
 
