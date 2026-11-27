@@ -90,6 +90,28 @@ Notable changes to Scout. Format loosely follows
 
 ### Fixed
 
+- Parallel worktree sandboxes were not actually isolated, and the symptom was
+  nothing at all. `tests/integration/test_brindle_pushdown.py` resolved its DSN
+  from `os.environ` with a hardcoded `localhost:5433` default, and `os.environ`
+  does not read the `.env` a sandbox writes — so inside a worktree the eleven
+  checks of the project's central premise reached for whatever sat on the default
+  port. With a sibling or the main clone there, the fixtures `DROP` and `CREATE`
+  a table in that database; with nothing there, all eleven skipped while the
+  sandbox's own Postgres sat healthy and unused. They now resolve the DSN through
+  settings, which honours both `.env` and the environment variable CI passes, and
+  a test asserts no database-backed test can bypass settings again.
+- `scripts/worktree.sh` could not create a working sandbox for any task in this
+  repo. It built the Compose project name as `scout-$slug`, Docker Compose
+  refuses an uppercase project name, and every task slug starts with `T-`, so
+  `scripts/db.sh up` died on `invalid project name`. The name is lowercased now,
+  on teardown as well as creation — an existing sandbox still carries the
+  uppercase one, and `docker compose down` failing on it used to leave the
+  container and its volume running while the script printed success. A failed
+  teardown now says so instead.
+- Two concurrent `scripts/worktree.sh new` calls could be handed the same port.
+  The kernel picks a free one and the socket closes again before Compose binds
+  it, so port allocation now also skips any port a sibling sandbox has already
+  claimed.
 - An empty `ANTHROPIC_API_KEY` now counts as no key at all. `ANTHROPIC_API_KEY=`
   in a `.env` parsed as an empty string rather than as unset, which satisfied
   every `is None` check: `scout doctor` reported "environment looks good" while

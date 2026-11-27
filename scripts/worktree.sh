@@ -44,8 +44,22 @@ branch_merged_via_pr() {
   [[ "${n:-0}" -gt 0 ]]
 }
 
+# A free TCP port, not already claimed by a sibling sandbox. The kernel hands out
+# a port and we close it again before Compose binds it, so asking twice in quick
+# succession can return the same number; the sibling check closes that window,
+# since two sandboxes on one port means the second silently talks to the first's
+# database.
 free_port() {
-  python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'
+  local port tries=0 base_dir
+  base_dir="$(dirname "$(main_worktree)")/scout-wt"
+  while (( tries++ < 20 )); do
+    port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+    if ! grep -qs "^export SCOUT_DB_PORT=\"$port\"$" "$base_dir"/*/.sandbox/env; then
+      printf '%s\n' "$port"
+      return 0
+    fi
+  done
+  die "could not find an unclaimed port after $tries attempts"
 }
 
 cmd_new() {
@@ -79,7 +93,10 @@ cmd_new() {
 
   local port project
   port="$(free_port)"
-  project="scout-$slug"
+  # Lowercased: Compose refuses a project name with an uppercase letter, and
+  # every task slug starts with "T-", so `scripts/db.sh up` died on "invalid
+  # project name" for every task this repo has.
+  project="scout-${slug,,}"
 
   # Loaded by scripts/db.sh. Kept separate from .env because this is shell syntax
   # while .env is Scout's own dotenv-format settings file.
@@ -159,12 +176,20 @@ cmd_rm() {
 
   # -v drops the pgdata volume too; leaving it behind quietly eats disk.
   if [[ -f "$wt_dir/.sandbox/env" ]]; then
-    (
+    if (
       set +u
       . "$wt_dir/.sandbox/env"
+      # Lowercased on the way out as well as in: a sandbox created before the
+      # project name was lowercased still carries the uppercase one, and Compose
+      # refuses it -- which used to leave the container and its volume running
+      # while this printed success.
+      export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME,,}"
       cd "$wt_dir" && docker compose down -v --remove-orphans
-    ) >/dev/null 2>&1 || true
-    echo "stopped sandbox Postgres and removed its volume"
+    ) >/dev/null 2>&1; then
+      echo "stopped sandbox Postgres and removed its volume"
+    else
+      echo "warning: could not stop this sandbox's Postgres; check 'docker ps'" >&2
+    fi
   fi
 
   if [[ -d "$wt_dir" ]]; then
