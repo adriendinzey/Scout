@@ -104,6 +104,33 @@ Notable changes to Scout. Format loosely follows
 
 ### Fixed
 
+- Parallel worktree sandboxes were not actually isolated, and the symptom was
+  nothing at all. `tests/integration/test_brindle_pushdown.py` resolved its DSN
+  from `os.environ` with a hardcoded `localhost:5433` default, and `os.environ`
+  does not read the `.env` a sandbox writes — so inside a worktree the eleven
+  checks of the project's central premise reached for whatever sat on the default
+  port. With a sibling or the main clone there, the fixtures `DROP` and `CREATE`
+  a table in that database; with nothing there, all eleven skipped while the
+  sandbox's own Postgres sat healthy and unused. They now resolve the DSN through
+  settings, which honours both `.env` and the environment variable CI passes, and
+  a unit test fails if any integration module, conftest included, reads the
+  environment directly or carries a literal connection string.
+- `scripts/worktree.sh` could not create a working sandbox for any task in this
+  repo. It built the Compose project name as `scout-$slug`, Docker Compose
+  refuses an uppercase project name, and every task slug starts with `T-`, so
+  `scripts/db.sh up` died on `invalid project name`. The name is lowercased now,
+  so `new` refuses a slug that differs from an existing sandbox, worktree or
+  branch only in case. Otherwise two sandboxes would share one database, and
+  removing either would delete the other's. A slug may no longer contain a `.`,
+  which Compose refuses as well. Teardown no longer reports success it cannot
+  back up: it says when it found nothing to stop, and when `docker compose down`
+  fails or Docker is unreachable it stops before deleting the worktree, whose
+  `.sandbox/env` is the only record of what to clean up.
+- Port allocation now also skips any port a sibling sandbox has already claimed.
+  The kernel hands out a free port and the socket closes again before Compose
+  binds it, so a second sandbox could be given the same port in the hours before
+  the first started its database. Two `new` calls in the same instant can still
+  race, since nothing locks between choosing a port and recording it.
 - An empty `ANTHROPIC_API_KEY` now counts as no key at all. `ANTHROPIC_API_KEY=`
   in a `.env` parsed as an empty string rather than as unset, which satisfied
   every `is None` check: `scout doctor` reported "environment looks good" while

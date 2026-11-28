@@ -11,15 +11,22 @@ small synthetic fixture; no real listing data is involved.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 
 import psycopg
 import pytest
 
+from scout.config import get_settings
+
 pytestmark = pytest.mark.integration
 
-DSN = os.environ.get("SCOUT_DATABASE_URL", "postgresql://scout:scout@localhost:5433/scout")
+# Through settings, not os.environ. A worktree sandbox points its own .env at its
+# own Postgres, and os.environ does not read .env -- so a hardcoded localhost:5433
+# default sent this module at whatever database happened to be on that port,
+# which in a sandbox is a sibling's or the main clone's. These fixtures DROP and
+# CREATE a table, so that is a write into someone else's database, and the
+# isolation the worktree tooling exists to provide was lost with no symptom.
+DSN = get_settings().database_url
 
 # Small and low-dimensional: this fixture tests the query *plan* and the
 # correctness of what comes back, not retrieval quality.
