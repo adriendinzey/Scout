@@ -99,19 +99,24 @@ Notable changes to Scout. Format loosely follows
   a table in that database; with nothing there, all eleven skipped while the
   sandbox's own Postgres sat healthy and unused. They now resolve the DSN through
   settings, which honours both `.env` and the environment variable CI passes, and
-  a test asserts no database-backed test can bypass settings again.
+  a unit test fails if any integration module, conftest included, reads the
+  environment directly or carries a literal connection string.
 - `scripts/worktree.sh` could not create a working sandbox for any task in this
   repo. It built the Compose project name as `scout-$slug`, Docker Compose
   refuses an uppercase project name, and every task slug starts with `T-`, so
   `scripts/db.sh up` died on `invalid project name`. The name is lowercased now,
-  on teardown as well as creation — an existing sandbox still carries the
-  uppercase one, and `docker compose down` failing on it used to leave the
-  container and its volume running while the script printed success. A failed
-  teardown now says so instead.
-- Two concurrent `scripts/worktree.sh new` calls could be handed the same port.
-  The kernel picks a free one and the socket closes again before Compose binds
-  it, so port allocation now also skips any port a sibling sandbox has already
-  claimed.
+  so `new` refuses a slug that differs from an existing sandbox, worktree or
+  branch only in case. Otherwise two sandboxes would share one database, and
+  removing either would delete the other's. A slug may no longer contain a `.`,
+  which Compose refuses as well. Teardown no longer reports success it cannot
+  back up: it says when it found nothing to stop, and when `docker compose down`
+  fails or Docker is unreachable it stops before deleting the worktree, whose
+  `.sandbox/env` is the only record of what to clean up.
+- Port allocation now also skips any port a sibling sandbox has already claimed.
+  The kernel hands out a free port and the socket closes again before Compose
+  binds it, so a second sandbox could be given the same port in the hours before
+  the first started its database. Two `new` calls in the same instant can still
+  race, since nothing locks between choosing a port and recording it.
 - An empty `ANTHROPIC_API_KEY` now counts as no key at all. `ANTHROPIC_API_KEY=`
   in a `.env` parsed as an empty string rather than as unset, which satisfied
   every `is None` check: `scout doctor` reported "environment looks good" while

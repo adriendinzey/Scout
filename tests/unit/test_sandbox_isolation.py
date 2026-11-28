@@ -31,42 +31,80 @@ INTEGRATION_TESTS = Path(__file__).resolve().parents[1] / "integration"
 #: one: integration tests do not touch `os.environ` at all.
 ENVIRONMENT_READERS = frozenset({"environ", "getenv"})
 
+#: A connection string written into a test is the other way round settings.
+DSN_SCHEMES = ("postgresql://", "postgres://")
+
 
 def modules() -> list[Path]:
-    return sorted(
-        path for path in INTEGRATION_TESTS.rglob("test_*.py") if path.name != "__init__.py"
-    )
+    """Every module under tests/integration, conftest included.
+
+    A fixture moved into a conftest is still a database-backed test's DSN, and
+    pytest loads it the same way.
+    """
+    return sorted(path for path in INTEGRATION_TESTS.rglob("*.py") if path.name != "__init__.py")
 
 
-def reads_the_environment_directly(path: Path) -> bool:
-    """True if the module mentions `os.environ` / `os.getenv` anywhere."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def integration_test_modules() -> list[Path]:
+    return [path for path in modules() if path.name.startswith("test_")]
+
+
+def tree_of(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def bypasses_settings(path: Path) -> list[str]:
+    """Every way `path` reaches a database without going through settings.
+
+    Read off the syntax tree, so a comment explaining the rule -- the pushdown
+    module has one -- is not mistaken for breaking it.
+    """
+    found = []
+    for node in ast.walk(tree_of(path)):
+        if isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_READERS:
+            found.append(f"line {node.lineno}: .{node.attr}")
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
+            found.extend(
+                f"line {node.lineno}: from os import {alias.name}"
+                for alias in node.names
+                if alias.name in ENVIRONMENT_READERS
+            )
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and any(scheme in node.value for scheme in DSN_SCHEMES)
+        ):
+            found.append(f"line {node.lineno}: a literal connection string")
+    return found
+
+
+def asks_settings(path: Path) -> bool:
+    """Whether the module's code, not merely its prose, refers to `get_settings`."""
     return any(
-        isinstance(node, ast.Attribute) and node.attr in ENVIRONMENT_READERS
-        for node in ast.walk(tree)
+        (isinstance(node, ast.Name) and node.id == "get_settings")
+        or (isinstance(node, ast.Attribute) and node.attr == "get_settings")
+        or (isinstance(node, ast.ImportFrom) and any(a.name == "get_settings" for a in node.names))
+        for node in ast.walk(tree_of(path))
     )
 
 
-def test_no_integration_test_resolves_its_database_from_the_environment() -> None:
-    offenders = [path.name for path in modules() if reads_the_environment_directly(path)]
-    assert offenders == [], (
-        f"these integration tests bypass .env, so in a worktree sandbox they talk to "
+def test_no_integration_test_resolves_its_database_around_settings() -> None:
+    offenders = {path.name: found for path in modules() if (found := bypasses_settings(path))}
+    assert offenders == {}, (
+        f"these integration modules bypass .env, so in a worktree sandbox they talk to "
         f"whatever is on the default port instead of the sandbox's own Postgres: {offenders}. "
         f"Use get_settings().database_url."
     )
 
 
 def test_every_integration_test_goes_through_settings() -> None:
-    """The positive half: each module actually asks settings for the DSN.
+    """The positive half: each test module's code actually asks settings for the DSN.
 
     Without this, deleting the connection entirely would satisfy the test above.
     """
-    missing = [
-        path.name for path in modules() if "get_settings" not in path.read_text(encoding="utf-8")
-    ]
+    missing = [path.name for path in integration_test_modules() if not asks_settings(path)]
     assert missing == [], f"these integration tests never ask settings for a database: {missing}"
 
 
 def test_there_are_integration_modules_to_check() -> None:
     """Otherwise both tests above pass by scanning an empty directory."""
-    assert len(modules()) > 1
+    assert len(integration_test_modules()) > 1

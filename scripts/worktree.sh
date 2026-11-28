@@ -29,9 +29,20 @@ usage() { sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 main_worktree() { git worktree list --porcelain | sed -n 's/^worktree //p' | head -1; }
 
+# No ".": the slug becomes part of a Compose project name, and Compose refuses a
+# dot there, so a dotted slug made a worktree whose database could never start.
 valid_slug() {
-  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid slug '$1' (letters, digits, . _ -)"
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "invalid slug '$1' (letters, digits, _ -)"
 }
+
+# tr rather than bash's own lowercase expansion, which needs bash 4: macOS ships
+# bash 3.2 as /bin/bash.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# The Compose project for a slug. Compose refuses an uppercase project name, and
+# every task slug starts with "T-", so it is lowercased -- which is why
+# cmd_new has to refuse a slug that differs from a sibling's only in case.
+project_for() { printf 'scout-%s' "$(lower "$1")"; }
 
 # True if a PR for branch $1 has already been merged. Squash/rebase merges rewrite
 # the commits, so `git branch -d` still sees the branch as "unmerged" — this
@@ -45,21 +56,46 @@ branch_merged_via_pr() {
 }
 
 # A free TCP port, not already claimed by a sibling sandbox. The kernel hands out
-# a port and we close it again before Compose binds it, so asking twice in quick
-# succession can return the same number; the sibling check closes that window,
-# since two sandboxes on one port means the second silently talks to the first's
-# database.
+# a port and we close it again before Compose binds it, so a port can be handed
+# to a second sandbox in the hours before the first runs `db.sh up`; the sibling
+# check closes that gap. It only narrows the one between two `new` calls in the
+# same instant, since nothing locks between choosing the port and writing it.
 free_port() {
-  local port tries=0 base_dir
+  local port tries base_dir
   base_dir="$(dirname "$(main_worktree)")/scout-wt"
-  while (( tries++ < 20 )); do
+  for ((tries = 1; tries <= 20; tries++)); do
     port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
     if ! grep -qs "^export SCOUT_DB_PORT=\"$port\"$" "$base_dir"/*/.sandbox/env; then
       printf '%s\n' "$port"
       return 0
     fi
   done
-  die "could not find an unclaimed port after $tries attempts"
+  die "could not find an unclaimed port in 20 attempts"
+}
+
+# Refuse a slug whose project name, worktree, or branch a sibling already has
+# under a different case. Lowercasing maps R70-x and r70-x onto one Compose
+# project: the second sandbox's `db.sh up` would take over the first's
+# container and volume, and removing either would delete the other's database.
+refuse_case_collisions() {
+  local slug="$1" project base_dir existing
+  project="$(project_for "$slug")"
+  base_dir="$(dirname "$(main_worktree)")/scout-wt"
+  if grep -qs "^export COMPOSE_PROJECT_NAME=\"$project\"$" "$base_dir"/*/.sandbox/env; then
+    die "another sandbox already uses Compose project '$project'; choose a different slug"
+  fi
+  for existing in "$base_dir"/*/; do
+    [[ -d "$existing" ]] || continue
+    existing="$(basename "$existing")"
+    if [[ "$(lower "$existing")" == "$(lower "$slug")" ]]; then
+      die "worktree '$existing' differs from '$slug' only in case, and would share its database"
+    fi
+  done
+  while read -r existing; do
+    if [[ "$(lower "$existing")" == "$(lower "task/$slug")" ]]; then
+      die "branch '$existing' differs from 'task/$slug' only in case, and would share its database"
+    fi
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads/task/)
 }
 
 cmd_new() {
@@ -73,6 +109,12 @@ cmd_new() {
 
   git show-ref --verify --quiet "refs/heads/$branch" && die "branch $branch already exists"
   [[ -e "$wt_dir" ]] && die "$wt_dir already exists"
+  refuse_case_collisions "$slug"
+
+  # Chosen before anything is created, so a failure here leaves nothing behind.
+  local port project
+  port="$(free_port)"
+  project="$(project_for "$slug")"
 
   git fetch --quiet origin 2>/dev/null || echo "note: could not fetch origin; basing on local main"
   local base="main"
@@ -91,12 +133,6 @@ cmd_new() {
   done
   rm -f /tmp/wt-add.$$
 
-  local port project
-  port="$(free_port)"
-  # Lowercased: Compose refuses a project name with an uppercase letter, and
-  # every task slug starts with "T-", so `scripts/db.sh up` died on "invalid
-  # project name" for every task this repo has.
-  project="scout-${slug,,}"
 
   # Loaded by scripts/db.sh. Kept separate from .env because this is shell syntax
   # while .env is Scout's own dotenv-format settings file.
@@ -176,19 +212,29 @@ cmd_rm() {
 
   # -v drops the pgdata volume too; leaving it behind quietly eats disk.
   if [[ -f "$wt_dir/.sandbox/env" ]]; then
-    if (
+    local project containers volumes
+    # Lowercased on the way out as well as in, so a sandbox created before the
+    # project name was lowercased is torn down under the name Compose gave it.
+    project="$(set +u; . "$wt_dir/.sandbox/env"; lower "${COMPOSE_PROJECT_NAME:-}")"
+    [[ -n "$project" ]] || die "$wt_dir/.sandbox/env names no Compose project; nothing removed"
+    containers="$(docker ps -aq --filter "label=com.docker.compose.project=$project")" \
+      || die "docker is not reachable; nothing removed, so .sandbox/env still records '$project'"
+    volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=$project")" \
+      || die "docker is not reachable; nothing removed, so .sandbox/env still records '$project'"
+    if [[ -z "$containers$volumes" ]]; then
+      echo "no container or volume for Compose project '$project'; nothing to stop"
+    elif (
       set +u
       . "$wt_dir/.sandbox/env"
-      # Lowercased on the way out as well as in: a sandbox created before the
-      # project name was lowercased still carries the uppercase one, and Compose
-      # refuses it -- which used to leave the container and its volume running
-      # while this printed success.
-      export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME,,}"
+      export COMPOSE_PROJECT_NAME="$project"
       cd "$wt_dir" && docker compose down -v --remove-orphans
     ) >/dev/null 2>&1; then
       echo "stopped sandbox Postgres and removed its volume"
     else
-      echo "warning: could not stop this sandbox's Postgres; check 'docker ps'" >&2
+      # Stop before the worktree goes: .sandbox/env is the only record of which
+      # project to clean up, and deleting it would leave the database running
+      # with nothing pointing at it.
+      die "could not stop Compose project '$project'; the worktree is kept so it can be retried"
     fi
   fi
 
