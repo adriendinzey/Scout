@@ -12,7 +12,7 @@ A query looks like this:
 
 Scout turns that into structured filters plus a semantic query, and hands both to an agent with five tools over a filter-aware vector index. The agent chooses what to do next. It can count how many listings match before spending a search, look up the median price in a neighbourhood before moving a price ceiling, search, read a listing, or pull its reviews. The design constrains the agent in code rather than in the prompt, through a tool-call budget, a search budget, a cost ceiling, and a floor on group size that it cannot cross. It then writes a short answer that cites the listings and guest reviews it used, and states what it could not satisfy.
 
-> **Status: the data loads and the amenity columns are in, but the demo does not run yet.** `scout ask` is not implemented. The document template, the embedder, the index build, the Parse node, the Retrieve node and the agent loop are the next milestones. The [What works today](#what-works-today) section lists everything that is built. Nothing else in this README is claimed as working, and the [Evaluation](#evaluation) section stays empty until the numbers come from a real run. Milestones are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: the data loads and the amenity columns are in, but the demo does not run yet.** `scout ask` is not implemented. The Parse node is built. The document template, the embedder, the index build, the Retrieve node and the agent loop are the next milestones. The [What works today](#what-works-today) section lists everything that is built. Nothing else in this README is claimed as working, and the [Evaluation](#evaluation) section stays empty until the numbers come from a real run. Milestones are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -30,14 +30,15 @@ This is the state of `main` on 2026-11-27. Anything that is not ticked here is a
 | The `Filters` model and the filter-to-SQL mapping. It composes parameterized filtered-vector queries, fans out disjunctions up to a cap, and reports both the post-filters it fell back to and the filters that exclude NULLs | ✅ This is pure logic that nothing calls yet | `tests/unit/test_filters_to_sql.py` |
 | The LLM boundary. It holds the backend protocol, the Anthropic client with its cacheable prefix, a deterministic fake that can script a whole tool-use conversation, and per-run token and dollar totals held in memory | ✅ | `tests/unit/test_backend.py`, `test_fake_backend.py`, `test_anthropic_backend.py`, `test_usage.py` |
 | Amenity grouping and the 13 indexed amenity boolean columns. `scout data amenities` ranks every amenity group over the loaded data and `--backfill` derives the columns from each listing's amenity list; every load derives them too | ✅ 8,735 distinct spellings in the London snapshot group into 21 amenities, 13 of which earned an index key column (30 of the 32 PostgreSQL allows) | `tests/unit/test_amenities.py`, `tests/integration/test_amenities.py`, `tests/integration/test_schema.py` |
+| The Parse node. One schema-validated call, grounded in the vocabulary the database actually holds, turns a request into `Filters`, a semantic query, and the asks no filter can express. A name outside that vocabulary is reported and never reaches SQL. An invalid answer is retried once and then raises, rather than falling back to empty filters | ✅ Nothing calls it until `scout ask` lands, and it has not been run against the real API | `tests/unit/test_parse_node.py`, `tests/integration/test_parse_grounding.py` |
 | The document template, `scout data embed`, and `scout data index` | ⬜ M1 | Nothing yet |
-| The LangGraph wiring, the Parse node, the Retrieve node, and `scout ask` | ⬜ M2 | Nothing yet |
+| The LangGraph wiring, the Retrieve node, and `scout ask` | ⬜ M2 | Nothing yet |
 | The agent tool loop, the five tools, the enforced budgets, and `--mode fixed` | ⬜ M3 | Nothing yet |
 | The run store, `scout trace`, `scout runs`, and the per-run cost that gets persisted and printed | ⬜ M3.5 | Nothing yet |
 | Ranking, review citations, and the Answer node | ⬜ M4 | Nothing yet |
 | The evaluation harness, and every number in the [Evaluation](#evaluation) section | ⬜ M5 | Nothing yet |
 
-629 tests pass in total, made up of 565 unit tests and 64 integration tests against the Compose database. Both `ruff` and `mypy --strict` are clean. The commands that are not implemented exit non-zero and name the milestone they land in, rather than printing nothing and returning 0.
+706 tests pass in total, made up of 631 unit tests and 75 integration tests against the Compose database. Both `ruff` and `mypy --strict` are clean. The commands that are not implemented exit non-zero and name the milestone they land in, rather than printing nothing and returning 0.
 
 ## Why this exists
 
@@ -88,13 +89,13 @@ A sample trace, showing the agent calling `count_matches` and then searching aga
 
 ## What it costs to run
 
-Scout will call Claude for Parse once per query, then for each turn of the agent loop up to the cap, and then for the Answer. No node calls Claude yet, and the only code that can reach the API is the boundary in `src/scout/llm/`. You supply your own `ANTHROPIC_API_KEY`, which is read from the environment and never committed, so running Scout costs whoever runs it rather than the author.
+Scout will call Claude for Parse once per query, then for each turn of the agent loop up to the cap, and then for the Answer. Only Parse is built so far, nothing runs it until `scout ask` lands, and the only code that can reach the API is the boundary in `src/scout/llm/`. You supply your own `ANTHROPIC_API_KEY`, which is read from the environment and never committed, so running Scout costs whoever runs it rather than the author.
 
 Four measures keep that cost down, and two of them are already implemented:
 
 | Measure | State | Detail |
 |---|---|---|
-| Prompt caching | ✅ | The stable prefix is the grounding block together with the tool definitions, and it is byte-identical on every query, so it bills at roughly 0.1× after the first call. The cache breakpoint is set at the boundary, and cache reads and writes are counted and priced |
+| Prompt caching | ✅ built, savings unmeasured | The stable prefix is the grounding block together with the tool definitions, and it is byte-identical on every query, with a test for it. The cache breakpoint is set at the boundary, and cache reads and writes are counted and priced. A cached prefix bills at roughly 0.1×, but only once it clears the model's minimum cacheable length. That minimum is 4,096 tokens on `claude-haiku-4-5`, the default parse model, and Parse's prefix is an estimated 1.3K, so Parse is not expected to cache. The first real run measures it |
 | A per-query ceiling | ⬜ M3 | `SCOUT_MAX_QUERY_COST_USD` defaults to $0.10 and is validated configuration today. The mid-loop check that stops the agent and answers with what it already has arrives with the loop itself |
 | The Batch API | ⬜ M5 | The half-price rates are in the cost model already, but the evaluation harness that submits the batches is still to come |
 | A backend switch | ✅ | `SCOUT_LLM_BACKEND=fake` is the default, and it returns scripted tool-use conversations without touching the network, so development and CI cost nothing. The unit suite also blocks socket access, so no test can reach the real API |
