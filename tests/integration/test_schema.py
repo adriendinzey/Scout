@@ -22,6 +22,7 @@ from psycopg.rows import TupleRow
 
 from scout.config import get_settings
 from scout.data.migrate import apply_migrations
+from scout.data.parsers import DROPPED_PERSONAL_COLUMNS
 
 pytestmark = pytest.mark.integration
 
@@ -36,22 +37,6 @@ SCOUT_TABLES = frozenset(
         "property_types",
         "amenities",
         "data_snapshot",
-    }
-)
-
-# docs/DATA.md section 4. These never reach the database: they are dropped while
-# parsing, before the first INSERT, rather than stored and nulled.
-DROPPED_PERSONAL_FIELDS = frozenset(
-    {
-        "host_id",
-        "host_name",
-        "host_about",
-        "host_url",
-        "host_thumbnail_url",
-        "host_picture_url",
-        "listing_url",
-        "reviewer_id",
-        "reviewer_name",
     }
 )
 
@@ -164,11 +149,17 @@ def test_applying_again_is_a_no_op(conn, migrated):
 
 
 def test_no_personal_column_exists_in_any_scout_table(conn, migrated):
-    """Privacy is asserted, not trusted. A stray column here outranks features."""
+    """Privacy is asserted, not trusted. A stray column here outranks features.
+
+    The list is imported from the module that drops those columns, not copied.
+    A second hand-kept copy lived here and had already drifted -- it was missing
+    the two host_profile_* columns a later snapshot added -- so this test passed
+    while checking something narrower than the rule it enforces.
+    """
     offenders = conn.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
         "WHERE table_schema = %s AND column_name = ANY(%s)",
-        (TEST_SCHEMA, sorted(DROPPED_PERSONAL_FIELDS)),
+        (TEST_SCHEMA, sorted(DROPPED_PERSONAL_COLUMNS)),
     ).fetchall()
     assert offenders == [], f"personal columns reached the schema: {offenders}"
 

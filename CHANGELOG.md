@@ -101,6 +101,23 @@ Notable changes to Scout. Format loosely follows
   Nothing calls the node until `scout ask` lands.
 - Documentation: architecture, data licensing and privacy rules, development
   setup, evaluation method, coding standards, and roadmap.
+- A privacy audit for the two hard constraints that fail silently — no personal
+  data stored, no Inside Airbnb data in the repo. A stray `host_name` column
+  returns perfectly correct rows and a committed CSV passes every other test, so
+  the audit runs in the **unit** suite, on every pull request, rather than only
+  where Postgres is available: no migration and no string literal under `src/`
+  names a dropped personal column, no `reviewer_*` column exists at all, the
+  dropped-fields table in `docs/DATA.md` and the list the code enforces are
+  asserted to name the same columns, the data and trace directories are ignored
+  by git with nothing tracked under them, and no tracked file is corpus-shaped.
+  Each scan is pointed at a planted violation and asserted to fire, because a
+  scanner that cannot fail reads like coverage. The schema check that already
+  existed had kept its own copy of the dropped-fields list, which had drifted
+  narrower than the rule by two columns a later snapshot added; it now imports
+  the one list. `docs/DATA.md` § 6 previously claimed tests for the name
+  scrubber and the run store, neither of which is built; it now separates what
+  is enforced at this commit from what is not, and the audit fails the moment
+  the scrubber lands so the two are updated together.
 
 ### Fixed
 
