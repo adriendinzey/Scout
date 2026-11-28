@@ -84,9 +84,9 @@ host"). So:
 
 - A best-effort scrubbing pass removes probable personal names from review text
   **both** before embedding and before display.
-- It is **best-effort and must be described that way**. It is tested against a
-  fixture of real-shaped cases, and its limitations are stated in the README
-  rather than quietly hoped over.
+- It is **best-effort and must be described that way**. It is to be tested
+  against a fixture of real-shaped cases, with its limitations stated in the
+  README rather than quietly hoped over. Neither exists yet: see § 6.
 - The scrubber is one tested function with one call path. If you find a second
   place review text reaches a user, route it through the same function.
 
@@ -119,8 +119,8 @@ See `docs/ARCHITECTURE.md` § Schema for the full table definitions. In summary:
   as one JSONL file per run under `SCOUT_TRACE_DIR`, which is gitignored — a
   trace is a local artifact and is never committed.
 - **No secrets in the stored settings snapshot.** The run record keeps the
-  configuration so a report can be reproduced; the API key is excluded, and a test
-  asserts it.
+  configuration so a report can be reproduced; the API key is to be excluded, and
+  a test is to assert it once the run store exists (see § 6).
 
 ### Data that leaves the machine
 
@@ -149,16 +149,16 @@ than no claim at all.
 ### Enforced now
 
 `tests/unit/test_privacy_audit.py` is the audit, and it is a unit test on
-purpose: a personal column arrives in a pull request, and the schema-level check
-below needs Postgres and so runs only in the integration job.
+purpose: it reads text rather than a database, so it runs in well under a second
+with no Postgres, alongside the schema-level check below, which needs one.
 
 - No column whose name matches the dropped-fields list exists in any Scout
   table. Asserted twice: against `information_schema` once the migrations have
   been applied (`tests/integration/test_schema.py`), and against the migration
   files themselves without a database.
 - No `reviewer_*` column exists at all, whatever it is suffixed with.
-- No dropped-field name appears in any string literal under `src/`, except the
-  one list that names them in order to refuse them — so SQL that selects or
+- No dropped-field name appears in any string literal under `src/`, except
+  docstrings and the one list that names them in order to refuse them — so SQL that selects or
   copies a personal column fails here rather than at the first `COPY`.
 - The columns the loader writes contain no personal field, and
   `ListingRow`/`ReviewRow` have no field one could sit in: the parsers' own

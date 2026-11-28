@@ -7,10 +7,10 @@ time either is noticed it is in the git history, which is the one place a
 mistake cannot be taken back from.
 
 So this module is the audit `docs/DATA.md` section 6 promises, and it is a *unit*
-test on purpose: the schema check that already exists needs Postgres and
-therefore runs only in the integration job, while a personal column arrives in a
-pull request. Everything here reads text -- the migrations, the loader's own
-statements, `docs/DATA.md`, `git check-ignore` -- so it runs on every PR.
+test on purpose: the schema check that already exists needs Postgres, while
+everything here reads text -- the migrations, the loader's own statements,
+`docs/DATA.md`, `git check-ignore` -- so it runs in well under a second with no
+database, in the fast job every PR waits on first.
 
 Two rules the scans follow, because both have an obvious wrong version:
 
@@ -28,6 +28,7 @@ fail still reads like coverage.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -81,15 +82,29 @@ CORPUS_SUFFIXES = frozenset(
         ".npy",
         ".npz",
         ".pkl",
+        # An embedding saved by torch, and the other ways a bulk file is
+        # compressed or dumped.
+        ".pt",
+        ".safetensors",
+        ".csv.bz2",
+        ".csv.xz",
+        ".csv.zip",
+        ".tsv.bz2",
+        ".tsv.xz",
+        ".sql.bz2",
+        ".sql.xz",
+        ".backup",
     }
 )
 
-_SQL_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-_SQL_LINE_COMMENT = re.compile(r"--[^\n]*")
-# Postgres escapes a quote by doubling it, so a literal runs to the first
-# unpaired quote. Dollar-quoting is not used anywhere in Scout's SQL; if it ever
-# is, the migration scan has to learn about it.
-_SQL_SINGLE_QUOTED = re.compile(r"'(?:[^']|'')*'", re.DOTALL)
+# Literals and comments in one pass, so whichever starts first wins. Stripped in
+# two passes, comments first, a ` -- ` inside a quoted literal (migration 0002
+# has them) is taken for a comment and eats the closing quote, and the literal
+# pattern then swallows the real DDL up to the next quote -- a column after it
+# goes unseen. Postgres escapes a quote by doubling it, so a literal runs to the
+# first unpaired quote. Dollar-quoting is not used anywhere in Scout's SQL; if it
+# ever is, the migration scan has to learn about it.
+_SQL_NOT_EXECUTABLE = re.compile(r"'(?:[^']|'')*'|--[^\n]*|/\*.*?\*/", re.DOTALL)
 
 _HAS_DOCSTRING = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -106,10 +121,12 @@ def _personal_column_pattern(names: frozenset[str]) -> re.Pattern[str]:
 
 
 PERSONAL_COLUMNS = _personal_column_pattern(DROPPED_PERSONAL_COLUMNS)
-# reviewer_* is never legitimate whatever it is suffixed with, so the family is
-# caught rather than the two spellings the current snapshot happens to ship.
-# host_* cannot be swept the same way: host_is_superhost is kept.
-ANY_REVIEWER_COLUMN = re.compile(r"\breviewer_\w+\b")
+# reviewer* is never legitimate whatever follows it -- reviewer_name, a bare
+# reviewer, reviewerid -- so the family is caught rather than the two spellings
+# the current snapshot happens to ship, matching the integration check's
+# `LIKE 'reviewer%'`. host_* cannot be swept the same way: host_is_superhost is
+# kept.
+ANY_REVIEWER_COLUMN = re.compile(r"\breviewer\w*\b")
 
 
 def executable_sql(sql: str) -> str:
@@ -121,8 +138,7 @@ def executable_sql(sql: str) -> str:
     identifier is left alone -- `CREATE TABLE x ("host_name" text)` is a real
     column and has to be caught.
     """
-    without_comments = _SQL_LINE_COMMENT.sub(" ", _SQL_BLOCK_COMMENT.sub(" ", sql))
-    return _SQL_SINGLE_QUOTED.sub(" ", without_comments)
+    return _SQL_NOT_EXECUTABLE.sub(" ", sql)
 
 
 def migration_sql() -> list[tuple[str, str]]:
@@ -199,13 +215,20 @@ def tracked_files(*paths: str) -> list[str]:
 
 
 def require_work_tree() -> None:
-    """Skip rather than fail where there is no git checkout to interrogate.
+    """Skip where there is no git checkout at all; fail where git cannot read one.
 
-    An installed sdist has no `.git`. CI checks the repository out, so the
-    gitignore claims are still enforced where it matters.
+    An installed sdist has no `.git`, and CI checks the repository out, so the
+    gitignore claims are still enforced where it matters. But a checkout git
+    refuses to read -- a broken `GIT_DIR`, or the safe.directory check in a
+    container -- is a failure, not an absence: skipping it would turn this whole
+    class green without asking git a single question.
     """
-    if git("rev-parse", "--is-inside-work-tree").returncode != 0:
-        pytest.skip("not a git work tree")
+    if not (REPO_ROOT / ".git").exists():
+        pytest.skip("no .git here, so there is no checkout to interrogate")
+    result = git("rev-parse", "--is-inside-work-tree")
+    assert result.returncode == 0, (
+        f"there is a .git but git cannot read it: {result.stderr.strip()}"
+    )
 
 
 class TestTheScannersCanFail:
@@ -232,6 +255,25 @@ class TestTheScannersCanFail:
         planted = "COMMENT ON TABLE listings IS 'Carries no host_id and no host_name.'"
         assert not PERSONAL_COLUMNS.search(executable_sql(planted))
 
+    def test_the_sql_scan_sees_a_column_after_a_comment_marker_inside_a_literal(self) -> None:
+        """Migration 0002 puts ` -- ` inside a COMMENT literal; what follows is still SQL."""
+        planted = (
+            "COMMENT ON TABLE reviews IS 'Kept for citation -- never searched.';\n"
+            "ALTER TABLE reviews ADD COLUMN reviewer_name text;\n"
+            "COMMENT ON COLUMN reviews.comments IS 'Scrubbed before display.';"
+        )
+        assert PERSONAL_COLUMNS.search(executable_sql(planted))
+        assert ANY_REVIEWER_COLUMN.search(executable_sql(planted))
+
+    def test_the_sql_scan_sees_a_column_after_a_quote_inside_a_comment(self) -> None:
+        """The other order: an apostrophe in a comment opens no literal."""
+        planted = (
+            "-- the host's own name is never stored\n"
+            "CREATE TABLE listings (id int4, host_name text);\n"
+            "COMMENT ON TABLE listings IS 'one row per listing';"
+        )
+        assert PERSONAL_COLUMNS.search(executable_sql(planted))
+
     def test_the_sql_scan_still_sees_the_columns_that_are_kept(self) -> None:
         """Stripping comments and literals must not strip the statement too."""
         initial = dict(migration_sql())["0001_initial.sql"]
@@ -250,6 +292,15 @@ class TestTheScannersCanFail:
         )
         found = {text for _, text in string_literals(planted) if PERSONAL_COLUMNS.search(text)}
         assert found == {"host_name"}
+
+    def test_the_python_scan_catches_a_reviewer_column_nobody_listed(self, tmp_path: Path) -> None:
+        planted = tmp_path / "leaky.py"
+        planted.write_text(
+            'SQL = "INSERT INTO reviews (listing_id, reviewer_handle) VALUES (%s, %s)"\n',
+            encoding="utf-8",
+        )
+        found = [text for _, text in string_literals(planted) if ANY_REVIEWER_COLUMN.search(text)]
+        assert len(found) == 1
 
     def test_the_python_scan_skips_docstrings_and_the_dropped_list(self, tmp_path: Path) -> None:
         clean = tmp_path / "clean.py"
@@ -270,8 +321,8 @@ class TestNoPersonalColumnExistsInTheSchema:
 
     The integration suite checks `information_schema` once the migrations have
     been applied, which is the stronger check and the slower one. This is the
-    same guarantee read off the files, and it is the one that runs before a
-    merge.
+    same guarantee read off the files, and it is the one that needs no
+    database.
     """
 
     def offenders(self, pattern: re.Pattern[str]) -> list[str]:
@@ -309,7 +360,8 @@ class TestNoPersonalColumnExistsAnywhereInTheSource:
             f"{path.relative_to(SRC)}:{line}: {match.group(0)}"
             for path in sorted(SRC.rglob("*.py"))
             for line, text in string_literals(path)
-            for match in PERSONAL_COLUMNS.finditer(text)
+            for pattern in (PERSONAL_COLUMNS, ANY_REVIEWER_COLUMN)
+            for match in pattern.finditer(text)
         ]
         assert offenders == [], f"a personal column name reached the source: {offenders}"
 
@@ -363,7 +415,7 @@ class TestTheLoaderWritesNoPersonalColumn:
 
 
 class TestTheDocumentedListAndTheCodeAgree:
-    """One source of truth, because three copies had already drifted.
+    """One source of truth, because a hand-kept copy had already drifted.
 
     `docs/DATA.md` section 4 is the binding list; `DROPPED_PERSONAL_COLUMNS` is
     what the code enforces. A column added to the prose and not the code is a
@@ -404,6 +456,20 @@ class TestTheDocumentedListAndTheCodeAgree:
         assert len(self.documented_columns()) > 5
 
 
+def trace_dir_in_repo() -> Path | None:
+    """`SCOUT_TRACE_DIR` relative to the repository, or None when it lies outside.
+
+    Absolute is not the same as outside: `/home/me/scout/runs` is inside a
+    checkout at `/home/me/scout`, and a trace there can be committed.
+    """
+    trace_dir = get_settings().trace_dir
+    if not trace_dir.is_absolute():
+        return trace_dir
+    root = REPO_ROOT.resolve()
+    resolved = trace_dir.resolve()
+    return resolved.relative_to(root) if resolved.is_relative_to(root) else None
+
+
 class TestNoCorpusDataIsInTheRepo:
     """Hard constraint 1. Gitignored is the mechanism; untracked is the claim."""
 
@@ -417,9 +483,9 @@ class TestNoCorpusDataIsInTheRepo:
 
     def test_the_trace_directory_is_ignored(self) -> None:
         """A step record quotes listing and review text, so a trace stays local."""
-        trace_dir = get_settings().trace_dir
-        if trace_dir.is_absolute():
-            pytest.skip(f"SCOUT_TRACE_DIR is {trace_dir}: outside the repo, so never committed")
+        trace_dir = trace_dir_in_repo()
+        if trace_dir is None:
+            pytest.skip(f"SCOUT_TRACE_DIR is {get_settings().trace_dir}: outside the repo")
         probe = str(trace_dir / "run-0123.jsonl")
         assert git("check-ignore", "-q", probe).returncode == 0, (
             f"SCOUT_TRACE_DIR is {trace_dir}, which .gitignore does not cover"
@@ -427,9 +493,9 @@ class TestNoCorpusDataIsInTheRepo:
 
     def test_nothing_under_those_directories_is_tracked(self) -> None:
         """Ignoring a path does not untrack a file committed before the rule."""
-        trace_dir = get_settings().trace_dir
+        trace_dir = trace_dir_in_repo()
         paths = ["data", "eval/labels"]
-        if not trace_dir.is_absolute():
+        if trace_dir is not None:
             paths.append(str(trace_dir))
         tracked = tracked_files(*paths)
         assert tracked == [], f"corpus or trace files are tracked: {tracked}"
@@ -476,5 +542,10 @@ def test_the_name_scrubber_does_not_exist_yet() -> None:
     the scrubber lands, and whoever lands it moves the scrubber claim into the
     enforced half of section 6 and replaces this with the real test.
     """
-    with pytest.raises(ModuleNotFoundError):
-        import scout.data.document  # noqa: F401
+    # Whether the module exists, not whether it imports: a template module that
+    # imports the embedder -- an extra CI does not install -- would raise
+    # ModuleNotFoundError for its dependency and leave this tripwire disarmed.
+    assert importlib.util.find_spec("scout.data.document") is None, (
+        "scout/data/document.py exists: replace this tripwire with the scrubber's real "
+        "test, and move the scrubber claim into the enforced half of docs/DATA.md section 6"
+    )
