@@ -33,6 +33,7 @@ from scout.data.amenities import (
     fold_amenity,
     groups_for_spelling,
     indexed_amenity_columns,
+    indexed_amenity_names,
     render_report,
 )
 from scout.data.migrate import default_migrations_dir
@@ -364,6 +365,22 @@ def test_the_index_key_budget_is_not_exceeded() -> None:
     assert FIXED_INDEX_KEY_COLUMNS + len(INDEXED_AMENITY_GROUPS) <= MAX_INDEX_KEY_COLUMNS
     # No amenity column may collide with a filter column of the same name.
     assert not set(indexed_amenity_columns()) & set(FIXED_INDEX_FILTER_COLUMNS)
+
+
+def test_one_name_is_offered_per_indexed_amenity() -> None:
+    """The vocabulary a model sees is 13 names, not every indexed spelling.
+
+    `columns_for_spelling` maps all 141 of the snapshot's indexed spellings onto
+    the 13 columns, which is what a filter needs; a prompt needs the opposite,
+    or it offers the model "Free driveway parking on premises - 20 spaces".
+    """
+    names = indexed_amenity_names()
+
+    assert len(names) == len(indexed_amenity_columns())
+    assert len(set(names)) == len(names)
+    for name in names:
+        # Each name is itself a spelling of exactly the amenity it names.
+        assert len(columns_for_spelling(name)) == 1
 
 
 def test_every_column_name_is_distinct_and_shaped_like_a_flag() -> None:

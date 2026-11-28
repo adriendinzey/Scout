@@ -173,6 +173,26 @@ ALTER TABLE amenities DROP COLUMN is_indexed;
 ALTER TABLE amenities ADD COLUMN is_indexed bool NOT NULL
     GENERATED ALWAYS AS (indexed_column IS NOT NULL) STORED;
 
+-- Which spelling is the amenity's own name. The retrieval layer wants every
+-- spelling mapped to its column, so that a filter naming "Pocket wifi" or "Free
+-- dryer -- In unit" is pushed down; the parse vocabulary wants the opposite --
+-- one name per amenity. Offering it all 141 indexed spellings would put
+-- "Free driveway parking on premises - 20 spaces" in front of the model and
+-- bloat a prompt prefix this project deliberately keeps byte-identical and
+-- cached. So one row per column carries the name a guest would recognise.
+ALTER TABLE amenities ADD COLUMN is_canonical bool NOT NULL DEFAULT false;
+
+-- A canonical spelling of nothing is a contradiction: the flag exists to pick
+-- one row out of the set that shares a column.
+ALTER TABLE amenities ADD CONSTRAINT amenities_canonical_is_indexed CHECK (
+    NOT is_canonical OR indexed_column IS NOT NULL
+);
+
+COMMENT ON COLUMN amenities.is_canonical IS
+    'True for the one spelling per indexed column that names the amenity: what '
+    'the parse vocabulary offers the model, as against indexed_column, which '
+    'maps every spelling to the column that filters it.';
+
 COMMENT ON COLUMN amenities.indexed_column IS
     'The listings boolean column that filters this amenity, or NULL when the '
     'only way to filter it is the amenities array. Several spellings share one '

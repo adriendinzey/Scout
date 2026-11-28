@@ -625,7 +625,9 @@ class TestReloading:
         into an array post-filter.
         """
         _, snapshot = loaded
-        conn.execute("UPDATE amenities SET indexed_column = NULL")
+        # Both, because a canonical spelling of no column is a state the schema
+        # refuses -- which is the point of the constraint.
+        conn.execute("UPDATE amenities SET indexed_column = NULL, is_canonical = false")
 
         load(conn, snapshot)
 
@@ -637,6 +639,14 @@ class TestReloading:
             )
             == "has_dedicated_workspace"
         )
+        assert (
+            scalar(
+                conn, "SELECT is_canonical FROM amenities WHERE name = %s", "Dedicated workspace"
+            )
+            is True
+        )
+        # In 97% of listings and deliberately not indexed, so a reload must not
+        # start claiming it has a column.
         assert scalar(conn, "SELECT indexed_column FROM amenities WHERE name = 'Wifi'") is None
 
 

@@ -251,6 +251,10 @@ def data_amenities(
                     f"  {'amenities.indexed_column':<26} {written.lookup_rows_flagged:>8,} "
                     f"lookup rows ({written.lookup_rows_changed:,} changed)"
                 )
+                print(
+                    f"  {'amenities.is_canonical':<26} {written.lookup_rows_canonical:>8,} "
+                    f"names offered to the parse vocabulary"
+                )
             if report or not backfill:
                 print(render_report(read_amenity_report(conn)))
     except AmenityError as exc:

@@ -223,7 +223,10 @@ Which amenity each column filters is not inferred from its name: `amenities`
 gains an `indexed_column`, filled from the group table in
 `src/scout/data/amenities.py`, so the 141 spellings that mean one of the 13
 amenities all resolve to the right column and `is_indexed` is generated from it
-rather than maintained beside it. The booleans are derived data — every load
+rather than maintained beside it. A second flag, `is_canonical`, marks one
+spelling per column: the filter layer wants every spelling mapped, while the
+parse vocabulary wants one name per amenity, or the cached prompt prefix would
+offer the model "Free driveway parking on premises - 20 spaces". The booleans are derived data — every load
 recomputes them from the amenity array in the same transaction, and
 `scout data amenities --backfill` recomputes them on demand.
 

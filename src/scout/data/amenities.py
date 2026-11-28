@@ -460,9 +460,23 @@ INDEXED_AMENITY_COLUMNS: Final[tuple[str, ...]] = tuple(
 )
 
 
+INDEXED_AMENITY_NAMES: Final[tuple[str, ...]] = tuple(
+    group.name for group in INDEXED_AMENITY_GROUPS
+)
+
+
 def indexed_amenity_columns() -> tuple[str, ...]:
     """The boolean columns, in schema order. One per indexed group."""
     return INDEXED_AMENITY_COLUMNS
+
+
+def indexed_amenity_names() -> tuple[str, ...]:
+    """The name of each indexed amenity: one spelling per column.
+
+    What a vocabulary offers a model, as against `columns_for_spelling`, which
+    maps all 141 of the snapshot's indexed spellings onto the 13 columns.
+    """
+    return INDEXED_AMENITY_NAMES
 
 
 @lru_cache(maxsize=_SPELLING_CACHE)
@@ -676,10 +690,13 @@ WHERE listings.id = derived.id
 """
 
 _UPDATE_LOOKUP_COLUMNS: Final = """
-UPDATE amenities SET indexed_column = derived.indexed_column
-FROM (SELECT * FROM unnest(%s::int4[], %s::text[])) AS derived (id, indexed_column)
+UPDATE amenities
+SET indexed_column = derived.indexed_column, is_canonical = derived.is_canonical
+FROM (SELECT * FROM unnest(%s::int4[], %s::text[], %s::bool[]))
+    AS derived (id, indexed_column, is_canonical)
 WHERE amenities.id = derived.id
-  AND amenities.indexed_column IS DISTINCT FROM derived.indexed_column
+  AND (amenities.indexed_column, amenities.is_canonical)
+      IS DISTINCT FROM (derived.indexed_column, derived.is_canonical)
 """
 
 # Reading zero rows, purely to find out whether the columns exist. A backfill
@@ -705,7 +722,7 @@ def _require_amenity_schema(cur: psycopg.Cursor[TupleRow]) -> None:
                 )
             )
         )
-        cur.execute("SELECT indexed_column FROM amenities LIMIT 0")
+        cur.execute("SELECT indexed_column, is_canonical FROM amenities LIMIT 0")
     except psycopg.errors.UndefinedColumn as exc:
         raise AmenityError(
             f"this schema has no amenity columns to derive into ({exc}); apply the migrations first"
@@ -744,6 +761,7 @@ class BackfillReport:
     per_column: Mapping[str, int]
     listings_changed: int
     lookup_rows_flagged: int
+    lookup_rows_canonical: int
     lookup_rows_changed: int
 
 
@@ -791,21 +809,28 @@ def backfill_amenity_columns(conn: Connection) -> BackfillReport:
 
             lookup_ids: list[int] = []
             lookup_columns: list[str | None] = []
+            canonical_flags: list[bool] = []
             flagged = 0
+            canonical = 0
             cur.execute(_READ_LOOKUP_NAMES)
             for amenity_id, name in cur.fetchall():
-                matched = columns_for_spelling(str(name))
+                spelling = str(name)
+                matched = columns_for_spelling(spelling)
                 # Several columns for one spelling is possible by construction;
                 # the lookup table holds one, so the decision has to be stable
                 # rather than whichever the set iterated first.
                 column = min(matched) if matched else None
+                is_canonical = spelling in INDEXED_AMENITY_NAMES
                 lookup_ids.append(int(amenity_id))
                 lookup_columns.append(column)
+                canonical_flags.append(is_canonical)
                 if column is not None:
                     flagged += 1
+                if is_canonical:
+                    canonical += 1
             lookup_changed = 0
             if lookup_ids:
-                cur.execute(_UPDATE_LOOKUP_COLUMNS, (lookup_ids, lookup_columns))
+                cur.execute(_UPDATE_LOOKUP_COLUMNS, (lookup_ids, lookup_columns, canonical_flags))
                 lookup_changed = cur.rowcount
     except psycopg.Error as exc:
         raise AmenityError(f"could not derive the amenity columns: {exc}") from exc
@@ -816,6 +841,7 @@ def backfill_amenity_columns(conn: Connection) -> BackfillReport:
         per_column=dict(per_column),
         listings_changed=listings_changed,
         lookup_rows_flagged=flagged,
+        lookup_rows_canonical=canonical,
         lookup_rows_changed=lookup_changed,
     )
 

@@ -99,8 +99,11 @@ Notable changes to Scout. Format loosely follows
   objects for 92,633 listings instead of ~320 MB). A schema that has no amenity
   columns is an error even when there are no rows to derive, rather than a clean
   report on a database that cannot hold the answer.
-  `amenities.indexed_column` names the column that filters each spelling, and
-  `is_indexed` is generated from it so the two cannot disagree; the migration
+  `amenities.indexed_column` names the column that filters each spelling and
+  `is_canonical` marks the one spelling per column that the parse vocabulary
+  offers a model — the filter layer wants all 141 spellings mapped, a prompt
+  wants 13 names — while `is_indexed` is generated from `indexed_column` so the
+  two cannot disagree; the migration
   refuses to run on a database where the old hand-set flag was in use, because
   it records *that* an amenity was indexed and never which column filtered it.
 - Two schema corrections the London file forced, in migration `0002`:

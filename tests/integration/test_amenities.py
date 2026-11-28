@@ -26,6 +26,7 @@ from scout.data.amenities import (
     backfill_amenity_columns,
     columns_for_listing,
     indexed_amenity_columns,
+    indexed_amenity_names,
 )
 from scout.data.migrate import apply_migrations
 
@@ -263,6 +264,42 @@ def test_the_lookup_maps_each_spelling_to_the_column_that_filters_it(conn, loade
     }
     # Deliberately not indexed, however often they are asked for.
     assert {"Wifi", "Kitchen", "Washer", "Heating", "Free street parking"} <= unindexed
+
+
+def test_the_lookup_offers_one_name_per_column_to_the_parse_vocabulary(conn, loaded):
+    """`is_canonical` is the vocabulary; `indexed_column` is the filter mapping.
+
+    The fixture holds several spellings of the same amenity, so selecting on
+    `is_indexed` would offer a model two ways to say one thing -- and against
+    the real snapshot, 141 ways to say thirteen.
+    """
+    report = backfill_amenity_columns(conn)
+
+    canonical = {
+        str(name)
+        for (name,) in conn.execute("SELECT name FROM amenities WHERE is_canonical").fetchall()
+    }
+    assert canonical <= set(indexed_amenity_names())
+    assert report.lookup_rows_canonical == len(canonical)
+    # Every canonical row names a column, and no two name the same one.
+    columns = conn.execute(
+        "SELECT indexed_column, count(*) FROM amenities WHERE is_canonical GROUP BY 1"
+    ).fetchall()
+    assert all(column is not None and count == 1 for column, count in columns)
+
+    # The spelling variants are mapped but not offered.
+    variants = conn.execute(
+        "SELECT count(*) FROM amenities WHERE is_indexed AND NOT is_canonical"
+    ).fetchone()
+    assert variants and variants[0] > 0
+
+
+def test_a_canonical_spelling_of_no_column_is_refused(conn, loaded):
+    """The two columns cannot drift into a state that means nothing."""
+    backfill_amenity_columns(conn)
+
+    with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+        conn.execute("UPDATE amenities SET is_canonical = true WHERE indexed_column IS NULL")
 
 
 def test_a_schema_without_the_columns_says_so_rather_than_failing_obscurely(conn, loaded):
