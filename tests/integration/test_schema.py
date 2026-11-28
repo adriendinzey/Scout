@@ -21,6 +21,12 @@ from psycopg import sql
 from psycopg.rows import TupleRow
 
 from scout.config import get_settings
+from scout.data.amenities import (
+    AMENITY_COLUMN_BUDGET,
+    FIXED_INDEX_FILTER_COLUMNS,
+    FIXED_INDEX_KEY_COLUMNS,
+    indexed_amenity_columns,
+)
 from scout.data.migrate import apply_migrations
 
 pytestmark = pytest.mark.integration
@@ -86,6 +92,8 @@ MAX_INDEX_KEY_COLUMNS = 32  # PostgreSQL's limit, not Brindle's.
 # spent. The migration documents this number and the amenity selection is
 # sized against it.
 AMENITY_COLUMN_HEADROOM = MAX_INDEX_KEY_COLUMNS - 1 - len(FILTERABLE_COLUMNS)
+# The amenity booleans 0003 created, which now occupy part of that headroom.
+AMENITY_COLUMNS = indexed_amenity_columns()
 
 # Nullable on purpose. The rest of listings is NOT NULL, and the distinction is
 # load-bearing: a NULL satisfies no comparison, so `rating >= 4.5` excludes
@@ -144,7 +152,7 @@ def columns_of(conn: psycopg.Connection[TupleRow], table: str) -> dict[str, tupl
 
 
 def test_migrations_create_every_expected_table(conn, migrated):
-    assert migrated == ["0001", "0002"]
+    assert migrated == ["0001", "0002", "0003"]
 
     present = {
         str(row[0])
@@ -196,23 +204,56 @@ def test_filterable_columns_have_types_brindle_accepts(conn, migrated):
         assert actual_type == expected_type, f"{column} is {actual_type}, expected {expected_type}"
         assert actual_type in BRINDLE_FILTERABLE_TYPES
 
+    # The amenity booleans are filter columns like any other, and the one thing
+    # the retrieval layer assumes about them is that they are never NULL: it
+    # treats them as always-known, so a nullable one would turn an amenity
+    # filter into a silent exclusion of every listing without the flag set.
+    for column in AMENITY_COLUMNS:
+        assert column in listings, f"{column} is missing from listings"
+        column_type, is_nullable = listings[column]
+        assert column_type == "boolean", f"{column} is {column_type}"
+        assert not is_nullable, f"{column} must be NOT NULL"
+
+
+def test_the_fixed_filter_columns_are_the_ones_the_code_budgets_for(conn, migrated):
+    """The amenity budget is 32 minus these, so the two lists have to be one list.
+
+    `src/scout/data/amenities.py` names the fixed filter columns to derive how
+    many amenity slots are left. If a migration adds a filter column and that
+    list is not updated, the budget silently stays one too large and the index
+    build is where it surfaces.
+    """
+    assert set(FIXED_INDEX_FILTER_COLUMNS) == set(FILTERABLE_COLUMNS)
+    assert 1 + len(FILTERABLE_COLUMNS) == FIXED_INDEX_KEY_COLUMNS
+    assert AMENITY_COLUMN_BUDGET == AMENITY_COLUMN_HEADROOM
+
 
 def test_the_index_key_budget_leaves_room_for_the_amenity_columns(conn, migrated):
     """The index this schema exists to carry can actually be built on it.
 
     Arithmetic over a list of column names would pass even if one of those
     columns were retyped to something Brindle refuses, so this builds the real
-    thing on a copy of `listings`: the embedding, all 16 filter columns, and the
-    15 amenity booleans the migration says there is headroom for -- exactly 32
-    key columns, PostgreSQL's limit. Empty table, so the build is instant.
+    thing on a copy of `listings`: the embedding, all 16 filter columns, the
+    amenity booleans 0003 created, and enough stand-ins to fill the rest of the
+    headroom -- exactly 32 key columns, PostgreSQL's limit. Empty table, so the
+    build is instant.
+
+    The stand-ins exist because the real amenity set deliberately leaves slots
+    unspent. Testing only the columns that exist today would stop proving that
+    the schema has room for the budget the migration claims.
 
     This is not the production index. That one is created after the rows land,
     because Brindle rewrites the whole index blob on every write.
     """
     assert 1 + len(FILTERABLE_COLUMNS) + AMENITY_COLUMN_HEADROOM == MAX_INDEX_KEY_COLUMNS
+    unspent = AMENITY_COLUMN_HEADROOM - len(AMENITY_COLUMNS)
+    assert unspent >= 0, "the amenity set is over the index key budget"
 
     probe = sql.Identifier(TEST_SCHEMA, "index_budget_probe")
-    amenity_columns = [sql.Identifier(f"has_amenity_{n}") for n in range(AMENITY_COLUMN_HEADROOM)]
+    # LIKE INCLUDING ALL already copied the real amenity booleans, so only the
+    # unspent slots are added here; adding 15 again would be 45 key columns.
+    amenity_columns = [sql.Identifier(column) for column in AMENITY_COLUMNS]
+    spare_columns = [sql.Identifier(f"has_spare_amenity_{n}") for n in range(unspent)]
 
     conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(probe))
     conn.execute(
@@ -220,7 +261,7 @@ def test_the_index_key_budget_leaves_room_for_the_amenity_columns(conn, migrated
             probe, sql.Identifier(TEST_SCHEMA, "listings")
         )
     )
-    for column in amenity_columns:
+    for column in spare_columns:
         conn.execute(
             sql.SQL("ALTER TABLE {} ADD COLUMN {} bool NOT NULL DEFAULT false").format(
                 probe, column
@@ -231,6 +272,7 @@ def test_the_index_key_budget_leaves_room_for_the_amenity_columns(conn, migrated
         [sql.SQL("embedding brindle_vector_cosine_ops")]
         + [sql.Identifier(name) for name in FILTERABLE_COLUMNS]
         + amenity_columns
+        + spare_columns
     )
     try:
         # Left to raise: a refused column type or an over-budget key count both
@@ -369,3 +411,59 @@ def test_a_null_attribute_satisfies_no_comparison(conn, migrated):
     conn.execute("DELETE FROM neighbourhoods WHERE name = 'Nullington'")
     conn.execute("DELETE FROM room_types WHERE name = 'Private room'")
     conn.execute("DELETE FROM property_types WHERE name = 'Private room in home'")
+
+
+def test_the_amenity_lookup_names_the_column_that_filters_each_amenity(conn, migrated):
+    """The lookup is what the retrieval layer reads to map a name to a column.
+
+    `is_indexed` is generated from `indexed_column` rather than stored beside
+    it: two hand-maintained columns that have to agree eventually do not, and
+    the symptom would be an amenity the index can filter that nothing knows to
+    filter with -- or worse, one it cannot.
+    """
+    columns = columns_of(conn, "amenities")
+    assert columns["indexed_column"] == ("text", True)
+    assert columns["is_indexed"] == ("boolean", False)
+
+    indexed = conn.execute(
+        "INSERT INTO amenities (name, indexed_column) VALUES (%s, %s) "
+        "RETURNING indexed_column, is_indexed",
+        ("Elevator", "has_elevator"),
+    ).fetchone()
+    assert indexed == ("has_elevator", True)
+
+    unindexed = conn.execute(
+        "INSERT INTO amenities (name) VALUES (%s) RETURNING indexed_column, is_indexed",
+        ("Iron",),
+    ).fetchone()
+    assert unindexed == (None, False)
+
+    with pytest.raises(psycopg.errors.GeneratedAlways):
+        conn.execute("UPDATE amenities SET is_indexed = true WHERE name = 'Iron'")
+
+    # A lookup row pointing at a column that does not exist would surface as a
+    # failed index build or a query against a missing column, long after the
+    # row was written.
+    with pytest.raises(psycopg.errors.CheckViolation):
+        conn.execute(
+            "INSERT INTO amenities (name, indexed_column) VALUES (%s, %s)",
+            ("Nonsense", "has_not_a_real_column"),
+        )
+
+    conn.execute("DELETE FROM amenities WHERE name IN ('Elevator', 'Iron')")
+
+
+def test_every_indexed_amenity_column_the_code_derives_exists(conn, migrated):
+    """The group table and the migration are two files with one list between them."""
+    listings = columns_of(conn, "listings")
+    missing = [column for column in AMENITY_COLUMNS if column not in listings]
+    assert missing == [], f"the code derives columns the schema does not have: {missing}"
+
+    # And nothing the schema has is left unwritten: a has_* column with no group
+    # behind it stays false forever while looking like a filter that works.
+    orphans = [
+        column
+        for column in listings
+        if column.startswith("has_") and column not in set(AMENITY_COLUMNS)
+    ]
+    assert orphans == [], f"the schema has amenity columns no group derives: {orphans}"

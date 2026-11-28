@@ -10,10 +10,17 @@ import logging
 import sys
 from typing import Annotated
 
+import psycopg
 import typer
 
 from scout import __version__
 from scout.config import Settings, get_settings
+from scout.data.amenities import (
+    AmenityError,
+    backfill_amenity_columns,
+    read_amenity_report,
+    render_report,
+)
 from scout.data.load import LoadError, load_data
 from scout.data.migrate import MigrationError, run_migrations
 
@@ -81,12 +88,6 @@ def doctor() -> None:
 
 def _check_database(settings: Settings) -> bool:
     """Report on the database and the two extensions Scout compares."""
-    try:
-        import psycopg
-    except ImportError:
-        typer.secho("  psycopg is not installed", fg=typer.colors.RED, err=True)
-        return False
-
     try:
         with psycopg.connect(settings.database_url, connect_timeout=5) as conn:
             server = conn.execute("SHOW server_version").fetchone()
@@ -195,6 +196,71 @@ def data_load(
         f"{report.room_types} room types, {report.property_types} property types "
         f"({report.property_types_collapsed} collapsed), {report.amenities:,} amenities"
     )
+
+
+@data_app.command("amenities")
+def data_amenities(
+    report: Annotated[
+        bool,
+        typer.Option(
+            "--report",
+            help=(
+                "Rank the amenity groups by how many listings have them. "
+                "The default, and printed after --backfill when both are given."
+            ),
+        ),
+    ] = False,
+    backfill: Annotated[
+        bool,
+        typer.Option(
+            "--backfill",
+            help="Recompute the indexed amenity booleans from each listing's amenity list.",
+        ),
+    ] = False,
+) -> None:
+    """Rank the amenity groups, or derive the indexed boolean columns from them.
+
+    With neither flag, prints the report: that is the read-only answer to "what
+    is in this data", and the one worth running by accident.
+    """
+    settings = get_settings()
+    try:
+        conn = psycopg.connect(settings.database_url, connect_timeout=5)
+    except psycopg.Error as exc:
+        typer.secho(f"database unreachable: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho("start it with: docker compose up -d", err=True)
+        raise typer.Exit(code=1) from exc
+
+    try:
+        with conn:
+            if backfill:
+                # One transaction: half-derived booleans are worse than none,
+                # because nothing downstream can tell which half is current.
+                with conn.transaction():
+                    written = backfill_amenity_columns(conn)
+                print(
+                    f"derived {len(written.columns)} amenity columns over "
+                    f"{written.listings:,} listings "
+                    f"({written.listings_changed:,} rows changed)"
+                )
+                for column in written.columns:
+                    listings = written.per_column.get(column, 0)
+                    share = listings / written.listings * 100 if written.listings else 0.0
+                    print(f"  {column:<26} {listings:>8,}  {share:5.2f}%")
+                print(
+                    f"  {'amenities.indexed_column':<26} {written.lookup_rows_flagged:>8,} "
+                    f"lookup rows ({written.lookup_rows_changed:,} changed)"
+                )
+            if report or not backfill:
+                print(render_report(read_amenity_report(conn)))
+    except AmenityError as exc:
+        typer.secho(f"amenities failed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    except psycopg.Error as exc:
+        # Everything inside already arrives as an AmenityError, so this is the
+        # commit the context manager performs on the way out.
+        typer.secho(f"could not commit the amenity columns: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @data_app.command("embed")
