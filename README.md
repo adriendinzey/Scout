@@ -12,7 +12,7 @@ A query looks like this:
 
 Scout turns that into structured filters plus a semantic query, and hands both to an agent with five tools over a filter-aware vector index. The agent chooses what to do next. It can count how many listings match before spending a search, look up the median price in a neighbourhood before moving a price ceiling, search, read a listing, or pull its reviews. The design constrains the agent in code rather than in the prompt, through a tool-call budget, a search budget, a cost ceiling, and a floor on group size that it cannot cross. It then writes a short answer that cites the listings and guest reviews it used, and states what it could not satisfy.
 
-> **Status: the data loads, but the demo does not run yet.** `scout ask` is not implemented. The Parse node is built. The embedder, the index build, the Retrieve node and the agent loop are the next milestones. The [What works today](#what-works-today) section lists everything that is built. Nothing else in this README is claimed as working, and the [Evaluation](#evaluation) section stays empty until the numbers come from a real run. Milestones are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: the data loads and the amenity columns are in, but the demo does not run yet.** `scout ask` is not implemented. The Parse node is built. The document template, the embedder, the index build, the Retrieve node and the agent loop are the next milestones. The [What works today](#what-works-today) section lists everything that is built. Nothing else in this README is claimed as working, and the [Evaluation](#evaluation) section stays empty until the numbers come from a real run. Milestones are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -24,20 +24,21 @@ This is the state of `main` on 2026-11-27. Anything that is not ticked here is a
 |---|---|---|
 | Postgres 17 in one image with [Brindle](https://github.com/adriendinzey/Brindle) (pinned `025b1315`) and pgvector 0.8.0, plus `scout doctor` to confirm it | ✅ | `docker compose up -d --wait` and `uv run scout doctor`. This is a recorded run and not a test, because nothing in `tests/` drives the CLI |
 | Filter pushdown, the premise of the whole project. `EXPLAIN` shows `Index Cond` rather than a post-scan `Filter` for every supported predicate shape, `ef_search` bounds a ranked scan, and NULL satisfies no comparison | ✅ | `tests/integration/test_brindle_pushdown.py` |
-| The schema, the lookup tables, and the migration runner. `scout data migrate` applies migrations `0001` and `0002` | ✅ | `tests/integration/test_schema.py`, `tests/unit/test_migrate.py` |
+| The schema, the lookup tables, and the migration runner. `scout data migrate` applies migrations `0001`, `0002` and `0003` | ✅ | `tests/integration/test_schema.py`, `tests/unit/test_migrate.py` |
 | `scout data load`, which streams both CSVs into PostgreSQL. It drops host and reviewer identity during parsing into rows that have no field to hold it, caps the reviews kept per listing, replaces rather than duplicates on a reload, and refuses to run unless it is given the snapshot's release date | ✅ The London `2026-06-19` snapshot loads to 92,633 listings and 291,004 reviews, and `doc_text` and `embedding` are still NULL on every row | `tests/unit/test_load.py`, `tests/unit/test_parsers.py`, `tests/integration/test_load.py` |
 | Typed settings, including the validator that refuses a candidate pool larger than `ef_search`, together with cost accounting that covers prompt-cache and Batch rates | ✅ | `tests/unit/test_config.py`, `tests/unit/test_pricing.py` |
 | The `Filters` model and the filter-to-SQL mapping. It composes parameterized filtered-vector queries, fans out disjunctions up to a cap, and reports both the post-filters it fell back to and the filters that exclude NULLs | ✅ This is pure logic that nothing calls yet | `tests/unit/test_filters_to_sql.py` |
 | The LLM boundary. It holds the backend protocol, the Anthropic client with its cacheable prefix, a deterministic fake that can script a whole tool-use conversation, and per-run token and dollar totals held in memory | ✅ | `tests/unit/test_backend.py`, `test_fake_backend.py`, `test_anthropic_backend.py`, `test_usage.py` |
-| The amenity columns, the document template, `scout data embed`, and `scout data index` | ⬜ M1 | Nothing yet |
+| Amenity grouping and the 13 indexed amenity boolean columns. `scout data amenities` ranks every amenity group over the loaded data and `--backfill` derives the columns from each listing's amenity list; every load derives them too | ✅ 8,735 distinct spellings in the London snapshot group into 21 amenities, 13 of which earned an index key column (30 of the 32 PostgreSQL allows) | `tests/unit/test_amenities.py`, `tests/integration/test_amenities.py`, `tests/integration/test_schema.py` |
 | The Parse node. One schema-validated call, grounded in the vocabulary the database actually holds, turns a request into `Filters`, a semantic query, and the asks no filter can express. A name outside that vocabulary is reported and never reaches SQL. An invalid answer is retried once and then raises, rather than falling back to empty filters | ✅ Nothing calls it until `scout ask` lands, and it has not been run against the real API | `tests/unit/test_parse_node.py`, `tests/integration/test_parse_grounding.py` |
+| The document template, `scout data embed`, and `scout data index` | ⬜ M1 | Nothing yet |
 | The LangGraph wiring, the Retrieve node, and `scout ask` | ⬜ M2 | Nothing yet |
 | The agent tool loop, the five tools, the enforced budgets, and `--mode fixed` | ⬜ M3 | Nothing yet |
 | The run store, `scout trace`, `scout runs`, and the per-run cost that gets persisted and printed | ⬜ M3.5 | Nothing yet |
 | Ranking, review citations, and the Answer node | ⬜ M4 | Nothing yet |
 | The evaluation harness, and every number in the [Evaluation](#evaluation) section | ⬜ M5 | Nothing yet |
 
-556 tests pass in total, made up of 497 unit tests and 59 integration tests against the Compose database. Both `ruff` and `mypy --strict` are clean. The commands that are not implemented exit non-zero and name the milestone they land in, rather than printing nothing and returning 0.
+706 tests pass in total, made up of 631 unit tests and 75 integration tests against the Compose database. Both `ruff` and `mypy --strict` are clean. The commands that are not implemented exit non-zero and name the milestone they land in, rather than printing nothing and returning 0.
 
 ## Why this exists
 
@@ -129,7 +130,12 @@ uv run scout data migrate
 #    are not stable between releases.
 uv run scout data load
 
-# 6. Run the tests. The integration tests need the database from step 1.
+# 6. Derive the indexed amenity booleans, and see how the amenity groups rank.
+#    `scout data load` already derives them; this recomputes them on demand,
+#    and with no flag it just prints the ranking.
+uv run scout data amenities --report
+
+# 7. Run the tests. The integration tests need the database from step 1.
 uv run pytest
 ```
 

@@ -78,6 +78,10 @@ ignore = [
 "tests/**" = ["S101", "ANN", "T20", "S608"]
 # The CLI is the one place that legitimately writes to stdout.
 "src/scout/cli.py" = ["T20"]
+# The amenity tests quote spellings exactly as the snapshot writes them, en dash
+# and curly apostrophe included. A pattern is only proved by the real string, so
+# "fixing" the punctuation would test one the data does not contain.
+"tests/*/test_amenities.py" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.12"

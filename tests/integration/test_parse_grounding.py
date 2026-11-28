@@ -20,6 +20,7 @@ from psycopg.conninfo import make_conninfo
 from psycopg.rows import TupleRow
 
 from scout.config import get_settings
+from scout.data.amenities import backfill_amenity_columns
 from scout.data.migrate import apply_migrations
 from scout.data.parsers import OTHER_PROPERTY_TYPE
 from scout.graph.parse import GroundingError, grounding_for, load_grounding
@@ -35,8 +36,12 @@ BARE_SCHEMA = "scout_parse_grounding_bare_test"
 NEIGHBOURHOODS = ("Islington", "Camden", "Hackney")
 ROOM_TYPES = ("Private room", "Entire home/apt")
 PROPERTY_TYPES = ("Entire rental unit", OTHER_PROPERTY_TYPE, "Private room in home")
-INDEXED_AMENITIES = ("Wifi", "Dedicated workspace")
-UNINDEXED_AMENITIES = ("Hot tub", "Hair dryer")
+# Real spellings, and real decisions: these two have an indexed boolean column
+# and the two below do not, which the amenity backfill derives rather than this
+# fixture asserting by hand. "Wifi" is deliberately in the second group -- it is
+# in 97% of listings, so it earned no column.
+INDEXED_AMENITIES = ("Dedicated workspace", "Elevator")
+UNINDEXED_AMENITIES = ("Wifi", "Hot tub", "Hair dryer")
 
 
 def dsn_for(schema: str) -> str:
@@ -85,10 +90,10 @@ def loaded() -> Iterator[psycopg.Connection[TupleRow]]:
         insert_names(conn, "room_types", ROOM_TYPES)
         insert_names(conn, "property_types", PROPERTY_TYPES)
         insert_names(conn, "amenities", UNINDEXED_AMENITIES + INDEXED_AMENITIES)
-        conn.execute(
-            "UPDATE amenities SET is_indexed = true WHERE name = ANY(%s)",
-            (list(INDEXED_AMENITIES),),
-        )
+        # Derived by the real rules rather than set by hand: is_indexed is a
+        # generated column now, and which amenities have a boolean column is a
+        # property of the amenity group table, not of this test.
+        backfill_amenity_columns(conn)
         yield conn
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(LOADED_SCHEMA)))
 

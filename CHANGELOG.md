@@ -79,6 +79,33 @@ Notable changes to Scout. Format loosely follows
   that yields no usable listing at all is an error rather than an empty
   database. The snapshot's release date is required and recorded beside the
   data, since listing ids are not stable between releases.
+- Amenity grouping and the **13 indexed amenity booleans**, in migration
+  `0003`. One London snapshot writes 8,735 distinct amenity spellings for a few
+  hundred actual amenities, so each group matches whole strings rather than
+  substrings: "Dryer", "Free dryer – In unit" and "Paid dryer" are one
+  appliance, while "Hair dryer" — in 68% of listings — is not, and "Garden
+  view" is not outdoor space. Free never merges with paid. Which amenities earn
+  a column was chosen from real frequency counts on selectivity against demand,
+  not popularity: a predicate applied after the ranked scan keeps roughly its
+  prevalence share of the candidate pool, so wifi (97.1% of listings) stays an
+  array post-filter while pets allowed (13.3%) gets a column. 13 of the 15
+  available slots are spent, for 30 of PostgreSQL's 32 index key columns.
+  `scout data amenities` ranks every group against the loaded data — including
+  the eight that were considered and rejected, and the most common spellings no
+  group claims — and `--backfill` derives the booleans; every load now derives
+  them too, in the same transaction as the amenity arrays they come from. Only
+  rows whose flags actually move are written, so a second backfill writes
+  nothing, and the rows are streamed rather than buffered (43 MB of Python
+  objects for 92,633 listings instead of ~320 MB). A schema that has no amenity
+  columns is an error even when there are no rows to derive, rather than a clean
+  report on a database that cannot hold the answer.
+  `amenities.indexed_column` names the column that filters each spelling and
+  `is_canonical` marks the one spelling per column that the parse vocabulary
+  offers a model — the filter layer wants all 141 spellings mapped, a prompt
+  wants 13 names — while `is_indexed` is generated from `indexed_column` so the
+  two cannot disagree; the migration
+  refuses to run on a database where the old hand-set flag was in use, because
+  it records *that* an amenity was indexed and never which column filtered it.
 - Two schema corrections the London file forced, in migration `0002`:
   `price_usd` became `price_gbp`, because prices are quoted in pounds despite
   the dollar sign the source prints, and `instant_bookable` became nullable,

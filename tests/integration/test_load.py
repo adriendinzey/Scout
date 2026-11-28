@@ -587,16 +587,67 @@ class TestReloading:
         ).fetchone()
         assert row == (None, True)
 
-    def test_an_indexed_amenity_stays_indexed_across_a_reload(
+    def test_the_load_derives_the_indexed_amenity_columns(
         self, conn: psycopg.Connection[TupleRow], loaded: tuple[LoadReport, Snapshot]
     ) -> None:
-        """is_indexed is the amenity selection's answer, not the loader's to reset."""
+        """A loaded listing's amenity booleans are set, not left at their default.
+
+        The upsert does not write them -- an inserted row would take the column
+        default and an updated row would keep the flags from the list it used to
+        have -- so the load derives them from the array in the same transaction.
+        A false here looks exactly like a listing that does not have the amenity.
+        """
+        assert (
+            scalar(
+                conn,
+                "SELECT has_dedicated_workspace FROM listings WHERE source_listing_id = %s",
+                CANAL,
+            )
+            is True
+        )
+        assert (
+            scalar(
+                conn,
+                "SELECT has_dedicated_workspace FROM listings WHERE source_listing_id = %s",
+                PARK_ROOM,
+            )
+            is False
+        )
+
+    def test_the_amenity_indexing_decision_is_restored_by_a_reload(
+        self, conn: psycopg.Connection[TupleRow], loaded: tuple[LoadReport, Snapshot]
+    ) -> None:
+        """Which column filters an amenity is derived, so a reload cannot lose it.
+
+        It is also the loader's job to put it back: the lookup table is where
+        the retrieval layer reads the amenity-to-column mapping from, and a
+        reload that left it cleared would silently turn every amenity filter
+        into an array post-filter.
+        """
         _, snapshot = loaded
-        conn.execute("UPDATE amenities SET is_indexed = true WHERE name = 'Wifi'")
+        # Both, because a canonical spelling of no column is a state the schema
+        # refuses -- which is the point of the constraint.
+        conn.execute("UPDATE amenities SET indexed_column = NULL, is_canonical = false")
 
         load(conn, snapshot)
 
-        assert scalar(conn, "SELECT is_indexed FROM amenities WHERE name = 'Wifi'") is True
+        assert (
+            scalar(
+                conn,
+                "SELECT indexed_column FROM amenities WHERE name = %s",
+                "Dedicated workspace",
+            )
+            == "has_dedicated_workspace"
+        )
+        assert (
+            scalar(
+                conn, "SELECT is_canonical FROM amenities WHERE name = %s", "Dedicated workspace"
+            )
+            is True
+        )
+        # In 97% of listings and deliberately not indexed, so a reload must not
+        # start claiming it has a column.
+        assert scalar(conn, "SELECT indexed_column FROM amenities WHERE name = 'Wifi'") is None
 
 
 class TestSnapshotsThatWouldOtherwiseKillTheLoad:

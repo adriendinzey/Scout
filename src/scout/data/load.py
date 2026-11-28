@@ -5,7 +5,9 @@ The shape of the load is dictated by three facts.
 **The review file does not fit in memory.** London's is 2.2 million rows, so
 both files are streamed with `csv.DictReader` and pushed straight into a staging
 table with `COPY`; nothing accumulates in Python but the listing id set and the
-lookup vocabulary.
+lookup vocabulary. The amenity derivation at the end is the one step that holds
+something per listing -- one id and 13 booleans each, 43 MB of Python objects
+for London's 92,633 -- and it streams the rows it reads for the same reason.
 
 **The most recent reviews are chosen in SQL.** Keeping the newest N per listing
 in Python means tracking a heap per listing across the whole file; a window
@@ -42,6 +44,7 @@ from psycopg import sql
 from psycopg.rows import TupleRow
 
 from scout.config import Settings
+from scout.data.amenities import AmenityError, backfill_amenity_columns
 from scout.data.parsers import (
     INT8,
     OTHER_PROPERTY_TYPE,
@@ -414,6 +417,25 @@ def load_into(
             )
         logger.info("reviews: %d kept, at most %d per listing", kept, max_reviews_per_listing)
 
+        # In the same transaction as the arrays they are derived from. The
+        # upsert above does not write the indexed amenity booleans: an inserted
+        # row would take the column default and an updated row would keep the
+        # flags from the amenity list it used to have, so a filter would quietly
+        # stop matching listings that have the amenity.
+        try:
+            amenity_columns = backfill_amenity_columns(conn)
+        except AmenityError as exc:
+            # Its own error type, so it keeps its own message -- almost always
+            # "this schema has no amenity columns yet" -- behind the load's.
+            raise LoadError(f"deriving the amenity columns failed: {exc}") from exc
+        logger.info(
+            "amenity columns: %d of %d listings changed across %d columns, %d lookup rows indexed",
+            amenity_columns.listings_changed,
+            amenity_columns.listings,
+            len(amenity_columns.columns),
+            amenity_columns.lookup_rows_flagged,
+        )
+
         with _stage("recording the snapshot"):
             conn.execute(_RECORD_SNAPSHOT, (snapshot_date, city, distinct, kept))
 
@@ -487,9 +509,10 @@ def _scan_listings(path: Path) -> _Vocabulary:
 def _upsert_lookups(conn: Connection, vocabulary: _Vocabulary) -> dict[str, dict[str, int]]:
     """Fill the lookup tables and read back name -> id for each.
 
-    Existing rows are left alone rather than replaced: `amenities.is_indexed`
-    records which amenities earned an indexed boolean column, and a reload must
-    not quietly clear that.
+    Existing rows are left alone rather than replaced, so a reload keeps the
+    generated ids every other table references. The amenity rows carry which
+    boolean column filters them, which is derived rather than preserved: the
+    amenity step below recomputes it for every row at the end of each load.
     """
     ids: dict[str, dict[str, int]] = {}
     for table, names in (

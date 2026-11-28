@@ -214,6 +214,22 @@ what the snapshot turned out to contain: `price_usd` became `price_gbp`, because
 London's prices are quoted in pounds, and `instant_bookable` became nullable,
 because the scrape no longer publishes it.
 
+`0003` spends 13 of the 15 amenity slots on `has_*` booleans, and records the
+reasoning: the criterion is selectivity against demand, because a predicate
+applied after the ranked scan keeps roughly its prevalence share of the
+candidate pool. Wifi is in 97% of listings, so checking it afterwards is nearly
+free; pets allowed is in 13%, so it turns 100 candidates into about 13 rows.
+Which amenity each column filters is not inferred from its name: `amenities`
+gains an `indexed_column`, filled from the group table in
+`src/scout/data/amenities.py`, so the 141 spellings that mean one of the 13
+amenities all resolve to the right column and `is_indexed` is generated from it
+rather than maintained beside it. A second flag, `is_canonical`, marks one
+spelling per column: the filter layer wants every spelling mapped, while the
+parse vocabulary wants one name per amenity, or the cached prompt prefix would
+offer the model "Free driveway parking on premises - 20 spaces". The booleans are derived data — every load
+recomputes them from the amenity array in the same transaction, and
+`scout data amenities --backfill` recomputes them on demand.
+
 ## 6. What gets embedded
 
 One document per listing: name, description, neighbourhood name, room and property

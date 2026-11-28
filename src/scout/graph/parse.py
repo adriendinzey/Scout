@@ -166,7 +166,12 @@ _ROOM_TYPES: Final = "SELECT name, id FROM room_types"
 # kind of place. Offered to the model it would become the answer to "a
 # penthouse", and match everything that happened to be rare.
 _PROPERTY_TYPES: Final = "SELECT name, id FROM property_types WHERE name <> %s"
-_INDEXED_AMENITIES: Final = "SELECT name FROM amenities WHERE is_indexed"
+# One name per indexed amenity, not every spelling that maps to one. `is_indexed`
+# is true for all 141 of the snapshot's indexed spellings, so selecting on it
+# would offer the model "Free driveway parking on premises - 20 spaces" and
+# "Exercise equipment: elliptical, free weights, treadmill" -- and put them in a
+# prompt prefix this project keeps byte-identical so it can be cached.
+_INDEXED_AMENITIES: Final = "SELECT name FROM amenities WHERE is_canonical"
 
 
 def load_grounding(conn: Connection) -> Grounding:
