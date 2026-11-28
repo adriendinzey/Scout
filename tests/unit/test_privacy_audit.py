@@ -94,6 +94,12 @@ CORPUS_SUFFIXES = frozenset(
         ".sql.bz2",
         ".sql.xz",
         ".backup",
+        # Archives and single-file databases: any of them can carry the corpus
+        # whole, and Scout tracks none for a legitimate reason.
+        ".zip",
+        ".tar",
+        ".sqlite",
+        ".sqlite3",
     }
 )
 

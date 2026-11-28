@@ -87,8 +87,8 @@ host"). So:
 - It is **best-effort and must be described that way**. It is to be tested
   against a fixture of real-shaped cases, with its limitations stated in the
   README rather than quietly hoped over. Neither exists yet: see § 6.
-- The scrubber is one tested function with one call path. If you find a second
-  place review text reaches a user, route it through the same function.
+- The scrubber is to be one tested function with one call path. If you find a
+  second place review text reaches a user, route it through the same function.
 
 ### Coordinates
 
@@ -112,8 +112,8 @@ See `docs/ARCHITECTURE.md` § Schema for the full table definitions. In summary:
   `SCOUT_MAX_REVIEWS_PER_LISTING` (default 5, most recent). **No reviewer name,
   no reviewer ID.**
 - **Lookup tables** — neighbourhoods, room types, property types, amenities.
-- **`runs` and `run_steps`** — what each query did: the query text, the mode, the
-  tools called, truncated input and output summaries, timings, tokens, and cost.
+- **`runs` and `run_steps`** (not built yet; see § 6) — what each query did: the
+  query text, the mode, the tools called, truncated input and output summaries, timings, tokens, and cost.
   A step summary can quote listing and review text, so **the scrubber runs before
   a summary is written**, not before it is displayed. The same records are written
   as one JSONL file per run under `SCOUT_TRACE_DIR`, which is gitignored — a
