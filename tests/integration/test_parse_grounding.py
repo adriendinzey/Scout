@@ -182,7 +182,10 @@ class TestTheProcessCache:
         assert first == load_grounding(loaded)
 
     def test_an_unreachable_database_raises_and_is_not_cached(self) -> None:
-        unreachable = "postgresql://scout:scout@127.0.0.1:1/scout"
+        # This database's own settings aimed at a port nothing listens on, rather
+        # than a connection string written out: a DSN in a test is how a sandbox
+        # ends up talking to someone else's database.
+        unreachable = make_conninfo(get_settings().database_url, host="127.0.0.1", port="1")
         grounding_for.cache_clear()
 
         with pytest.raises(GroundingError, match="could not connect"):
